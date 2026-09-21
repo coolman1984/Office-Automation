@@ -99,6 +99,31 @@ def materialize_reuse(src, dst):
         return "copy"
 
 
+def stage_changes(run, st, cfg, ctx):
+    from .changes import detect_changes
+    path = detect_changes(cfg, run.id, catalog_path=ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    st.detail("changes", con.execute("SELECT COUNT(*) FROM _changes").fetchone()[0])
+    con.close()
+
+
+def stage_rules(run, st, cfg, ctx):
+    from .rules import run_packs
+    path = run_packs(cfg, run.id, ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    failed = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='fail'").fetchone()[0]
+    errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
+    st.detail("failed_rules", failed)
+    st.detail("rule_errors", errors)
+    if errors:
+        st.fail("E_RULE", f"{errors} rule(s) could not execute")
+    elif cfg.block_on_rule_error:
+        blocking = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='fail' AND severity='error'").fetchone()[0]
+        if blocking:
+            st.fail("E_RULE", f"{blocking} blocking business rule(s) failed")
+    con.close()
+
+
 def stage_relations(run, st, cfg, ctx):
     from .relations import infer_relations
     path = infer_relations(cfg, run.id, ctx.get("catalog"))
@@ -177,7 +202,8 @@ def stage_extract(run, st, cfg, ctx):
 
 
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
-          ("analyze", stage_analyze), ("relations", stage_relations))
+          ("analyze", stage_analyze), ("relations", stage_relations), ("rules", stage_rules),
+          ("changes", stage_changes))
 
 
 def run_refresh(cfg, force=False):

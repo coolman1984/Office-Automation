@@ -20,7 +20,7 @@ DEFAULTS = {
     "extract": {"verify": True, "strict": False, "block_cells": 500_000, "cache_cells": 12_000_000,
                 "open_timeout": 180, "visible": False, "sheets": []},
     "analysis": {"sample_values": 5, "top_k": 5, "relation_sample": 1000, "row_hash_max_rows": 200_000},
-    "rules": {"packs": []},
+    "rules": {"packs": [], "block_on_error": False},
     "ai": {"context_tokens": 4000, "query_rows": 50, "query_bytes": 8192, "query_timeout": 5},
 }
 SOURCE_KEYS = {"path": str, "alias": str}
@@ -94,6 +94,7 @@ class Config:
         self.extract = cfg["extract"]
         self.analysis = cfg["analysis"]
         self.rule_packs = tuple(cfg["rules"]["packs"])
+        self.block_on_rule_error = cfg["rules"]["block_on_error"]
         self.ai = cfg["ai"]
 
     runs_dir = property(lambda self: os.path.join(self.data_dir, "runs"))
