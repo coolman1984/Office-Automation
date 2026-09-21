@@ -15,6 +15,8 @@ STAGES = {
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),
     "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite via Excel COM, verified against Excel (stand-alone)"),
     "catalog": ("xl2ai.catalog", "main", "build stable source/table/column identities for a run"),
+    "analyze": ("xl2ai.analyze", "main", "profile data, flag generic quality issues and infer candidate keys"),
+    "relations": ("xl2ai.relations", "main", "infer conservative relationships between tables"),
 }
 
 

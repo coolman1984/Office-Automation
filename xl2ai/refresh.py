@@ -99,6 +99,24 @@ def materialize_reuse(src, dst):
         return "copy"
 
 
+def stage_relations(run, st, cfg, ctx):
+    from .relations import infer_relations
+    path = infer_relations(cfg, run.id, ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    n = con.execute("SELECT COUNT(*) FROM _relationships").fetchone()[0]
+    con.close()
+    st.detail("relationships", n)
+
+
+def stage_analyze(run, st, cfg, ctx):
+    from .analyze import analyze_catalog
+    path = analyze_catalog(cfg, run.id, ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    st.detail("quality_findings", con.execute("SELECT COUNT(*) FROM _dq_findings").fetchone()[0])
+    st.detail("candidate_keys", con.execute("SELECT COUNT(*) FROM _keys").fetchone()[0])
+    con.close()
+
+
 def stage_catalog(run, st, cfg, ctx):
     from .catalog import build_catalog
     path = build_catalog(cfg, run.id, run.m)
@@ -158,7 +176,8 @@ def stage_extract(run, st, cfg, ctx):
         st.partial("some sheets failed to extract; the run is not promoted unless allow_partial is set")
 
 
-STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog))
+STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
+          ("analyze", stage_analyze), ("relations", stage_relations))
 
 
 def run_refresh(cfg, force=False):
