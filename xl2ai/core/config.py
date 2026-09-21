@@ -105,8 +105,17 @@ class Config:
         return path if os.path.isabs(path) else os.path.abspath(os.path.join(self.root, path))
 
     def fingerprint(self):
-        """Stable hash of everything that can change results (recorded in the run manifest)."""
+        """Stable hash of the whole project configuration (recorded in the run manifest)."""
         blob = {"cfg": self.raw, "sources": [s.as_dict() for s in self.sources]}
+        return hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
+
+    def extract_fingerprint(self):
+        """Hash only settings that can change extraction output.
+
+        Refresh/retention settings and unrelated sources deliberately do not participate, so an unchanged workbook
+        can reuse its previous trusted database even when another source is added or retention policy changes.
+        """
+        blob = {"environment": self.raw["environment"], "extract": self.raw["extract"]}
         return hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
 
 

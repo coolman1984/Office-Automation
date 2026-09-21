@@ -177,7 +177,7 @@ class Run:
         mem = memory_status()
         manifest = {"contract_version": CONTRACT_VERSION, "run_id": run_id, "project": cfg.project,
                     "started": now_iso(), "finished": None, "status": "running", "promoted": False,
-                    "config_fingerprint": cfg.fingerprint(),
+                    "config_fingerprint": cfg.fingerprint(), "extract_fingerprint": cfg.extract_fingerprint(),
                     "platform": {"python": platform.python_version(), "pid": os.getpid(), "memory": mem},
                     "inputs": [], "stages": []}
         if mem and mem["commit_free_mb"] < LOW_COMMIT_MB:

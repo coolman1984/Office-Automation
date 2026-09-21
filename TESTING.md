@@ -15,6 +15,7 @@ python -m unittest tests.test_golden                 # byte-level regression onl
 | `test_excel_to_sqlite.py::TestIntegration` | ~30 edge cases on generated workbooks, crash recovery, password/corrupt files, verification catches truncation, no leaked Excel (exact PIDs) |
 | `test_golden.py` | output is byte-identical to `tests/golden/fingerprints.json` (2 synthetic + 2 specimen databases) |
 | `test_structure.py` | every global name resolves; platform has no specimen words; platform never imports packs; entry points work |
+| `test_incremental_refresh.py` | unchanged-source reuse, invalidation on data/extract-setting change, self-contained reused DBs |
 
 Fixtures: `tests/make_fixtures.py` builds them with Excel (`fixture_cache.py` shares one build per test run).
 Case list and coverage status: `EDGE_CASES.md`.

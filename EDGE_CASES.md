@@ -94,7 +94,8 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | new / removed / renamed sheets and columns between runs | planned P2 (ids), P6 (diff) |
 | column type changes, new categories, new periods/versions | planned P6 |
 | row-level changes without a key | planned P6 (row-hash multiset) |
-| several unrelated files; several related files; same file different versions | planned P1, P5 |
+| several unrelated files; several related files; same file different versions | partial (multi-source refresh built; relations planned P5) |
+| unchanged source between refreshes: do not reopen Excel; reuse only trusted identical extraction | covered [test_incremental_refresh.py] |
 | relationship discovery: true FK, false-positive small domains, composite keys | planned P5 |
 
 ## G. Data quality (seeded-defect fixtures; clean data must yield zero findings)
