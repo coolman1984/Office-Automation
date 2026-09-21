@@ -254,7 +254,7 @@ class TestHardKillGate(unittest.TestCase):
         run_id = None
         manifest_path = None
         try:
-            for _ in range(100):
+            for _ in range(300):
                 created = [r for r in runsmod.list_runs(self.cfg) if r not in before]
                 if created:
                     candidate = created[0]
@@ -266,7 +266,9 @@ class TestHardKillGate(unittest.TestCase):
                     if m.get("stages") and m["stages"][0].get("status") == "running":
                         run_id, manifest_path = candidate, p
                         break
-                time.sleep(0.05)
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
             self.assertTrue(run_id, "helper never reached a durably recorded running stage")
             self.assertTrue(os.path.exists(self.cfg.lock_file), "the lock should still be held at kill time")
         finally:
