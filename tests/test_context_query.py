@@ -67,6 +67,14 @@ class TestContextAndQuery(unittest.TestCase):
         self.assertIsNone(p2["relationships"][0]["containment"])
 
     def test_schema_and_describe_obey_query_caps(self):
+        c=sqlite3.connect(self.cat)
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  ("t2","s","Sheet2","data2","extract/s.db",1,1,1,"visible","fp2"))
+        c.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                  ("t2.c1","t2",1,"id","ID",1,"A","INTEGER","integer",1,0))
+        c.commit()
+        c.close()
+
         self.cfg.ai["query_rows"]=1
         sch=schema(self.cfg,run_id=self.run.id)
         self.assertEqual(sch["row_count"],1)
