@@ -1,0 +1,35 @@
+# TESTING
+
+All commands are PowerShell. Excel must be installed for integration and golden tests (they use real COM).
+
+```powershell
+python -m unittest discover -s tests                 # everything (about 2-7 min; fixtures are built by real Excel once per run)
+$env:XL2SQL_PERF = "1"; python -m unittest discover -s tests   # + 200k x 12 timing test
+python -m unittest tests.test_structure              # fast, no Excel
+python -m unittest tests.test_golden                 # byte-level regression only
+```
+
+| Module | What it proves |
+|---|---|
+| `test_excel_to_sqlite.py` unit classes | dates (1900/1904/phantom leap day), typing, naming, header detection, block iteration |
+| `test_excel_to_sqlite.py::TestIntegration` | ~30 edge cases on generated workbooks, crash recovery, password/corrupt files, verification catches truncation, no leaked Excel (exact PIDs) |
+| `test_golden.py` | output is byte-identical to `tests/golden/fingerprints.json` (2 synthetic + 2 specimen databases) |
+| `test_structure.py` | every global name resolves; platform has no specimen words; platform never imports packs; entry points work |
+
+Fixtures: `tests/make_fixtures.py` builds them with Excel (`fixture_cache.py` shares one build per test run).
+Case list and coverage status: `EDGE_CASES.md`.
+
+## Rules
+
+1. Regression gate on every phase: the whole suite passes and the goldens are unchanged, or a deliberate change is
+   listed in `CHANGELOG.md` and `python tests/regen_golden.py` is run in the same commit.
+2. A new capability needs a synthetic fixture for the case it handles, **and** a failing-case test (the check must be
+   shown able to fail, e.g. `test_verification_catches_a_truncated_extent`).
+3. The specimen files (`Price Comparison Data/`) are a stress test, never the spec; specimen tests skip when absent.
+4. Tests must not depend on other Excel activity on the machine: assert on the PIDs the tool reports, not on process counts.
+5. `tests/denylist_specimen.txt` lists words the generic platform may never contain.
+
+## Known test caveats
+
+* Excel on this machine wraps every saved file in DRM; saving/launching is slower and timings vary with machine load.
+* Performance numbers are recorded, not asserted tightly (the 200k-row test only asserts < 120 s).

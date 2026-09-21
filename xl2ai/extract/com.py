@@ -5,7 +5,11 @@ import gc
 import threading
 import time
 
-from .common import BUSY_CODES, DEAD_CODES, PROCESS_QUERY_LIMITED, PROCESS_TERMINATE, STILL_ACTIVE, XL_CALC_MANUAL, log, pythoncom, pywintypes, win32, win32api, win32gui, win32process
+from ..core.procs import kill_pid, pid_alive
+from .common import BUSY_CODES, DEAD_CODES, XL_CALC_MANUAL, log, pythoncom, pywintypes, win32, win32api, win32gui, win32process
+
+PROCESS_SET_QUOTA, PROCESS_TERMINATE = 0x0100, 0x0001
+
 
 class ExcelDied(Exception):
     """Excel crashed, hung (watchdog) or was disconnected; the caller may restart it and retry."""
@@ -30,24 +34,25 @@ def com_msg(exc):
     return f"{type(exc).__name__}: {exc}"
 
 
-def pid_alive(pid):
+def bind_to_job(pid):
+    """Put our Excel into a Windows job object that kills it when this Python process dies for any reason
+    (crash, taskkill, Ctrl+C). Returns the job handle to keep alive, or None if binding is not possible."""
     try:
-        h = win32api.OpenProcess(PROCESS_QUERY_LIMITED, False, pid)
-    except Exception:
-        return False
-    try:
-        return win32process.GetExitCodeProcess(h) == STILL_ACTIVE
-    finally:
-        win32api.CloseHandle(h)
-
-
-def kill_pid(pid):
-    try:
-        h = win32api.OpenProcess(PROCESS_TERMINATE, False, pid)
-        win32api.TerminateProcess(h, 1)
-        win32api.CloseHandle(h)
-    except Exception:
-        pass
+        import win32job
+        job = win32job.CreateJobObject(None, "")
+        info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+        info["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
+        h = win32api.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
+        try:
+            win32job.AssignProcessToJobObject(job, h)
+        finally:
+            win32api.CloseHandle(h)
+        return job
+    except Exception as e:
+        log("WARN", f"Could not bind Excel to a kill-on-exit job ({com_msg(e)}); "
+                    f"if this tool is killed, Excel may keep running")
+        return None
 
 
 def find_dialog(pid):
@@ -138,6 +143,7 @@ class ExcelSession:
         self.open_timeout, self.call_timeout = open_timeout, call_timeout
         self.app = self.wb = self.pid = None
         self.restarts = 0
+        self._job = None
 
     # ---- lifecycle -----------------------------------------------------------------------------
     def start(self):
@@ -156,6 +162,8 @@ class ExcelSession:
         except Exception:
             self.pid = None
         log("INFO", f"Excel started (pid {self.pid})")          # tests and operators can verify this pid exits
+        if self.pid:
+            self._job = bind_to_job(self.pid)
         for prop, val in (("Visible", self.visible), ("ScreenUpdating", False), ("DisplayAlerts", False),
                           ("EnableEvents", False), ("AskToUpdateLinks", False), ("AutomationSecurity", 3)):
             try:
@@ -209,6 +217,7 @@ class ExcelSession:
             else:
                 log("WARN", f"Excel (pid {pid}) did not exit; terminating it")
                 kill_pid(pid)
+        self._job = None                                   # closing the job handle also ends anything still in it
         self.pid = None
 
     # ---- guarded calls ---------------------------------------------------------------------------

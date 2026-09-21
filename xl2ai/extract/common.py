@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import sys
-import time
+
+from ..core.log import log  # noqa: F401  (re-exported: extract modules import it from here)
 
 try:
     import pythoncom
@@ -30,7 +31,3 @@ STILL_ACTIVE = 259
 BUSY_CODES = {-2147418111, -2147417846}                                  # call rejected / retry later
 DEAD_CODES = {-2147023174, -2147023170, -2147023169, -2147417848, -2147417836}  # RPC unavailable/failed/disconnected
 NoneType = type(None)
-
-
-def log(level, msg):
-    print(f"[{time.strftime('%H:%M:%S')}] {level:<5} {msg}", flush=True)

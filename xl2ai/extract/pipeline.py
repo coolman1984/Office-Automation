@@ -3,25 +3,28 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import glob
 import os
 import sys
 import time
 import traceback
 
-from .com import ExcelDied, ExcelSession, com_msg, kill_pid
+from ..core.config import wrapper_prefixes_or_empty
+from ..core.procs import kill_pid
+from ..sources.detect import sniff_file
+from ..sources.inventory import expand_paths
+from .com import ExcelDied, ExcelSession, com_msg
 from .common import SCHEMA_VERSION, VISIBILITY, log, pywintypes
 from .names import sanitize_table
 from .sheet import SheetResult, extract_sheet
-from .sources import sniff_file
 from .store import open_db, resolve_db_path, write_log
 from .verify import verify_table
+
 
 def process_file(src, db_path, opts):
     t_run = time.perf_counter()
     partial = db_path + ".partial"
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-    kind = sniff_file(src)
+    kind = sniff_file(src, getattr(opts, "wrapper_prefixes", ()))
     if kind == "encrypted":
         msg = "The file is password protected (Office encryption). Remove the password and try again."
         log("ERROR", msg)
@@ -154,16 +157,7 @@ def print_summary(results, open_s, close_s, total_s, db_path, checks, mismatches
 
 
 def collect_files(paths):
-    out = []
-    for p in paths:
-        if os.path.isdir(p):
-            for ext in ("xlsx", "xlsb", "xlsm", "xls"):
-                out += glob.glob(os.path.join(p, f"*.{ext}"))
-        elif any(ch in p for ch in "*?"):
-            out += glob.glob(p)
-        else:
-            out.append(p)
-    return [os.path.abspath(f) for f in dict.fromkeys(out) if not os.path.basename(f).startswith("~$")]
+    return expand_paths(paths)
 
 
 def main(argv=None):
@@ -172,7 +166,7 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    ap = argparse.ArgumentParser(description="Extract Excel workbooks into SQLite via Excel COM.")
+    ap = argparse.ArgumentParser(prog="xl2ai extract", description="Extract Excel workbooks into SQLite via Excel COM.")
     ap.add_argument("paths", nargs="+", help="Excel file(s), folder(s) or wildcard(s)")
     ap.add_argument("-o", "--output", help="output .db file (single input) or output folder")
     ap.add_argument("--no-verify", dest="verify", action="store_false", help="skip the Excel-vs-SQLite check")
@@ -184,6 +178,7 @@ def main(argv=None):
     ap.add_argument("--visible", action="store_true", help="show the Excel window (debugging)")
     opts = ap.parse_args(argv)
     opts.sheets = {s.strip().lower() for s in opts.sheet}
+    opts.wrapper_prefixes = wrapper_prefixes_or_empty()       # from xl2ai.toml if one is found, else none
 
     files = collect_files(opts.paths)
     if not files:

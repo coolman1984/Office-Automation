@@ -9,7 +9,6 @@ AMT
 T09
 S09
 T0A
-Model
 PVM
 Korean
-NASCA @ sources.py
+NASCA

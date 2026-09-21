@@ -19,7 +19,11 @@ Status legend: **[built]** exists and is tested, **[phase N]** planned. See `CHA
 9. Speed, reliability and token cost are designed in, and measured.
 10. Every stage runs alone and through one batch command.
 
-## 2. Review of the current implementation [built, `excel_to_sqlite.py`, 1,010 lines]
+## 2. Review of the implementation [built: `xl2ai/extract/`, split from a 1,140-line monolith in phase 0]
+
+Phase 0 is done: `python -m xl2ai extract` (and the old `python excel_to_sqlite.py`) run the same code; output is
+byte-identical to the monolith on 4 regression databases (`tests/golden/`). Modules: `common com names dates
+coltypes layout store sheet verify sources pipeline`. The findings below are the review that preceded the split.
 
 ### 2.1 Generic vs specimen-specific
 
@@ -30,7 +34,7 @@ Status legend: **[built]** exists and is tested, **[phase N]** planned. See `CHA
 | typing, date/1904/1900-bug handling, error cells, verification, atomic DB | generic |
 | tests + `tests/make_fixtures.py` | synthetic, generic edge cases |
 | `output/`, `test_output/`, `extract_excel.py` | specimen output / superseded draft; not part of the platform |
-| any sheet, column or business name in the engine | **none** (scanned; one comment mentioned a specimen column, removed) |
+| any sheet, column or business name in the engine | **none** now. The first scan missed two leaks that the new lint test (`test_platform_contains_no_specimen_words`) found: a comment naming a specimen column (removed) and a corporate DRM marker (`<## ...` file prefix) hard-coded in source detection (now the isolated, configurable `WRAPPER_PREFIXES` in `sources.py`, moving to config in phase 1) |
 
 So the extractor is a sound generic base. The specimen-specific risk is in *what I planned to build next*,
 not in what exists: the earlier plan had a "price/volume/mix" phase. That belongs in a rule pack (section 5).
@@ -49,7 +53,7 @@ not in what exists: the earlier plan had a "price/volume/mix" phase. That belong
 | R8 | Dialog detection only sees dialogs of the Excel process; a DRM agent prompt in another process falls back to the timeout | slow failure | also watch new top-level windows of the DRM/parent process tree; shorter default timeout for open-without-progress |
 | R9 | No text-number / text-date / null-token normalization | dirty data reaches analysis unlabeled | normalization stage, opt-in and recorded (phase 4) |
 | R10 | Only `.db` + console output; nothing for AI | the actual goal is missing | context pack + query tools (phases 6-7) |
-| R11 | Single 1,000-line module | risky to extend | package split (phase 0) |
+| R11 | Single 1,000-line module | risky to extend | **done in phase 0** (package split, golden-verified) |
 | R12 | Excel Data Model / Power Query / external data not covered | data invisible to the tool | detect and report as `unsupported_content` at minimum (phase 3) |
 
 ## 3. Long-term structure
