@@ -63,6 +63,9 @@ class TestContextAndQuery(unittest.TestCase):
         self.assertEqual(b1,b2)
         self.assertLessEqual(p2["est_tokens"],self.cfg.ai["context_tokens"])
         self.assertEqual(p2["definitions"][0]["term"],"value")
+        self.assertIn("hash_mode",p2["sources"][0])
+        self.assertIn("format",p2["sources"][0])
+        self.assertNotIn("kind",p2["sources"][0])
         self.assertEqual(p2["relationships"][0]["status"],"confirmed")
         self.assertIsNone(p2["relationships"][0]["containment"])
 

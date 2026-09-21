@@ -11,7 +11,7 @@ from .core.errors import Xl2aiError
 
 
 def _slug(text):
-    s=re.sub(r"[^A-Za-z0-9_-]+","-",str(text).strip()).strip("-").lower()
+    s=re.sub(r"[^\w-]+","-",str(text).strip(),flags=re.UNICODE).strip("-").lower()
     return s or "project"
 
 
@@ -34,6 +34,7 @@ def create_project(output, name, sources, wrapper_prefixes=(), with_pack=False, 
            "[rules]",f"packs = [{_toml_string('packs/'+_slug(name)+'/pack.toml') if with_pack else ''}]",
            "block_on_error = false","",
            "[ai]","context_tokens = 4000","query_rows = 50","query_bytes = 8192","query_timeout = 5",""]
+    alias_counts={}
     for src in sources:
         p=os.path.abspath(src)
         try:
@@ -41,7 +42,13 @@ def create_project(output, name, sources, wrapper_prefixes=(), with_pack=False, 
             shown=rel if not rel.startswith("..") else p
         except ValueError:
             shown=p
-        lines += ["[[sources]]",f"path = {_toml_string(shown)}",""]
+        source_lines=["[[sources]]",f"path = {_toml_string(shown)}"]
+        if os.path.isfile(p) and not any(ch in src for ch in "*?"):
+            base=_slug(os.path.splitext(os.path.basename(p))[0])
+            alias_counts[base]=alias_counts.get(base,0)+1
+            alias=base if alias_counts[base]==1 else f"{base}-{alias_counts[base]}"
+            source_lines.append(f"alias = {_toml_string(alias)}")
+        lines += source_lines+[""]
     with open(output,"w",encoding="utf-8",newline="\n") as f:
         f.write("\n".join(lines).rstrip()+"\n")
     pack_path=None

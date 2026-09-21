@@ -18,6 +18,7 @@ class TestInitDoctor(unittest.TestCase):
             cfg=load_config(cfgp)
             self.assertEqual(cfg.project,"Demo Project")
             self.assertEqual(len(cfg.sources),1)
+            self.assertEqual(cfg.sources[0].alias,"source")
             self.assertTrue(os.path.isfile(pack))
             checks=run_doctor(cfg)
             self.assertTrue(any(c["name"]=="sources" and c["status"] for c in checks))

@@ -44,7 +44,7 @@ def _render_markdown(p):
     lines = ["# xl2ai context pack", "",
              f"run: {p['run_id']} | hash: {p['hash']} | est tokens: {p['est_tokens']}", "", "## Sources"]
     for s in p["sources"]:
-        lines.append(f"- {s['source_id']} | {s['kind']} | {s['size']} bytes | {s['mtime']}" +
+        lines.append(f"- {s['source_id']} | {s['format']} | {s['size']} bytes | {s['mtime']} | hash={s['hash_mode']}" +
                      (" | reused" if s.get("reused") else ""))
     lines += ["", "## Tables"]
     for t in p["tables"]:
@@ -97,12 +97,14 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                    "quality": [], "warnings": [], "omitted": []}
         omitted = {}
 
-        source_rows = con.execute("""SELECT s.source_id,s.size,s.mtime,s.hash_mode,s.reused,
+        source_rows = con.execute("""SELECT s.source_id,s.path,s.size,s.mtime,s.hash_mode,s.reused,
                                             COALESCE((SELECT COUNT(*) FROM _tables t WHERE t.source_id=s.source_id),0)
                                      FROM _sources s ORDER BY s.source_id""").fetchall()
-        for sid, size, mtime, hash_mode, reused, table_count in source_rows:
+        for sid, source_path, size, mtime, hash_mode, reused, table_count in source_rows:
+            source_format = os.path.splitext(source_path or "")[1].lower().lstrip(".") or "unknown"
             _add_budgeted(payload, "sources",
-                          {"source_id": sid, "kind": hash_mode, "size": int(size or 0), "mtime": mtime,
+                          {"source_id": sid, "format": source_format, "hash_mode": hash_mode,
+                           "size": int(size or 0), "mtime": mtime,
                            "reused": bool(reused), "tables": int(table_count)}, budget_tokens, omitted, "sources")
 
         table_rows = con.execute("""SELECT table_id,source_id,sheet_name,row_count,column_count

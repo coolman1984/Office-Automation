@@ -49,6 +49,8 @@ xl2ai refresh
 xl2ai report
 ```
 
+For explicit file paths, `init` also creates a stable source alias automatically. Use that alias in business-rule selectors.
+
 A project normally contains:
 
 ```
