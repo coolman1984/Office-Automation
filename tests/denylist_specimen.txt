@@ -1,0 +1,15 @@
+# Words that come from the specimen workbooks (Price Comparison Data). The generic platform (xl2ai/) must never
+# contain them; project knowledge belongs in packs/. One case-insensitive token per line; `#` starts a comment.
+# Format: token   or   token @ file.py   (file.py = the single place allowed to contain it, with a reason there)
+Price Comparison
+Country
+Guide
+QTY
+AMT
+T09
+S09
+T0A
+Model
+PVM
+Korean
+NASCA @ sources.py
