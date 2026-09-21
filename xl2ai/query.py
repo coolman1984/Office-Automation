@@ -11,7 +11,7 @@ import time
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id
-from .core.sqliteutil import ro_connection
+from .core.sqliteutil import install_readonly_authorizer, ro_connection
 
 
 def q(name):
@@ -189,6 +189,7 @@ def sql(cfg, source_id, statement, run_id=None):
         raise Xl2aiError("E_STAGE_INPUT",f"source not found: {source_id}")
     with _source_db(run_dir,rows[0][0]) as src:
         src.execute("PRAGMA query_only=ON")
+        install_readonly_authorizer(src)
         deadline=time.monotonic()+cfg.ai["query_timeout"]
         src.set_progress_handler(lambda:1 if time.monotonic()>deadline else 0,2000)
         try:

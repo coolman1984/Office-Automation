@@ -79,6 +79,10 @@ class TestContextAndQuery(unittest.TestCase):
         self.assertEqual(ok["rows"][0][0],3)
         with self.assertRaises(Xl2aiError):
             sql(self.cfg,"s","DELETE FROM data",run_id=self.run.id)
+        with self.assertRaises(Xl2aiError):
+            sql(self.cfg,"s","PRAGMA table_info(data)",run_id=self.run.id)
+        with self.assertRaises(Xl2aiError):
+            sql(self.cfg,"s","SELECT load_extension('x')",run_id=self.run.id)
 
 
 if __name__=="__main__":

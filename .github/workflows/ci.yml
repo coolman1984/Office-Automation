@@ -20,8 +20,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Install package
+        run: python -m pip install -e .
       - name: Compile platform
         run: python -m compileall -q xl2ai
+      - name: Check installed CLI
+        run: xl2ai --help
       - name: Run non-Excel regression suite
         run: >
           python -m unittest -v

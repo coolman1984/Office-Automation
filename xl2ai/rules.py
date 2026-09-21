@@ -17,6 +17,7 @@ import tomllib
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id
+from .core.sqliteutil import install_readonly_authorizer
 
 TABLE_TOKEN = re.compile(r"\{\{table:([^/{}]+)/([^{}]+)\}\}")
 
@@ -122,6 +123,7 @@ def _query_connection(run_dir, dbs, timeout_s):
         uri = f"file:{os.path.abspath(os.path.join(run_dir, db_rel.replace('/', os.sep)))}?mode=ro"
         con.execute(f"ATTACH DATABASE ? AS {q(alias)}", (uri,))
     con.execute("PRAGMA query_only=ON")
+    install_readonly_authorizer(con)
     deadline = time.monotonic() + timeout_s
     con.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 2000)
     return con
