@@ -2,7 +2,7 @@
 
 ## 0.3.0 - AI-ready platform completion/hardening (2026-09-21)
 
-* Added run catalog with stable source/table/column identities.
+* Added run catalog with source/sheet/name-based stable identities; schema/type/position drift is tracked separately.
 * Added profiling, generic data-quality findings, candidate keys and conservative relationship inference.
 * Added TOML rule packs with confirmed terms, keys, relationships, deterministic rules and KPIs.
 * Added run-to-run source/schema/volume/value/category/distribution/KPI and exact row-multiset change detection.

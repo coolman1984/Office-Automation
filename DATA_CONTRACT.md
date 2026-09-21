@@ -6,9 +6,11 @@ additive = minor, breaking = major (a major bump requires a migration note in `C
 
 ## 0. Conventions
 
-* Identifiers: `source_id` (stable id of a source file, from normalized path or config alias), `run_id`
-  (`YYYYMMDDTHHMMSS-<4hex>`), `table_id` (`<source_id>/<sheet_key>/<region>`), `column_id` (`<table_id>.<position>`).
-  In AI-facing output these are shortened to handles (`t3`, `t3.c7`) with a legend.
+* Identifiers: `source_id` (stable id of a source file, preferably from config alias), `run_id`
+  (`YYYYMMDDTHHMMSS-<4hex>`), `table_id` (source id + normalized sheet identity), and `column_id`
+  (table id + normalized unique SQL column name). Schema fingerprints and positions are deliberately separate from identity,
+  so adding/reordering columns does not rewrite the identities of unchanged columns. In AI-facing output these are shortened
+  to handles (`t3`, `t3.c7`) with a legend.
 * Trust labels on every derived fact: `detected | config | inferred | confirmed`, plus `method` and `score` (0-1).
 * **Evidence object** `{run_id, source_id, sheet, table, xl_row, xl_col, rule_id, pack}`; fields not applicable are omitted.
 * Severity: `info | warn | error`. An `error` finding blocks promotion only if the project config says so.

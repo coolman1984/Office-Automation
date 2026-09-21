@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import sys
+import unicodedata
 
 from .core.config import load_config
 from .core.errors import Xl2aiError
@@ -87,6 +88,22 @@ def _schema_fingerprint(columns):
     return hashlib.sha256(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
+def _identity_text(value):
+    return unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+
+
+def _table_id(source_id, sheet_name):
+    # One logical table per sheet is the current extraction contract. Schema is deliberately NOT part of identity.
+    digest = hashlib.sha256(_identity_text(sheet_name).encode("utf-8")).hexdigest()[:12]
+    return f"{source_id}/sheet-{digest}"
+
+
+def _column_id(table_id, sql_name):
+    # Extractor SQL names are unique inside a table. Position/type changes therefore do not rewrite identity.
+    digest = hashlib.sha256(_identity_text(sql_name).encode("utf-8")).hexdigest()[:12]
+    return f"{table_id}/col-{digest}"
+
+
 def _extract_stage(manifest):
     return next((s for s in manifest.get("stages", []) if s.get("name") == "extract"), None)
 
@@ -125,7 +142,6 @@ def build_catalog(cfg, run_id, manifest=None):
                                       FROM _extraction_log
                                       WHERE status='extracted' AND table_name IS NOT NULL
                                       ORDER BY sheet_index""").fetchall()
-                seen = {}
                 for sheet_name, table_name, rows, ncols, header_row, visibility in logs:
                     col_rows = src.execute("""SELECT position, sql_name, original_header, xl_col, xl_col_letter,
                                                      sql_type, kind, non_null, error_cells
@@ -134,14 +150,12 @@ def build_catalog(cfg, run_id, manifest=None):
                              "xl_col_letter": r[4], "sql_type": r[5], "kind": r[6], "non_null": r[7],
                              "error_cells": r[8]} for r in col_rows]
                     fp = _schema_fingerprint(cols)
-                    seen[fp] = seen.get(fp, 0) + 1
-                    suffix = "" if seen[fp] == 1 else f"-{seen[fp]}"
-                    table_id = f"{sid}/{fp[:12]}{suffix}"
+                    table_id = _table_id(sid, sheet_name)
                     con.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
                                 (table_id, sid, sheet_name, table_name, rec["db"], int(rows or 0), int(ncols or len(cols)),
                                  header_row, visibility, fp))
                     for c in cols:
-                        column_id = f"{table_id}.c{int(c['position'])}"
+                        column_id = _column_id(table_id, c["sql_name"])
                         con.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                     (column_id, table_id, int(c["position"]), c["sql_name"], c["original_header"],
                                      c["xl_col"], c["xl_col_letter"], c["sql_type"], c["kind"],

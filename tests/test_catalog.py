@@ -58,6 +58,38 @@ class TestCatalog(unittest.TestCase):
         self.assertEqual([x[1] for x in cols], ["id","amount"])
         self.assertNotIn("data", names, "catalog must not duplicate business rows")
 
+    def test_ids_survive_schema_and_position_changes(self):
+        p1 = build_catalog(self.cfg, self.run.id, self.run.m)
+        c = sqlite3.connect(p1)
+        try:
+            table_before = c.execute("SELECT table_id FROM _tables").fetchone()[0]
+            cols_before = dict(c.execute("SELECT name,column_id FROM _columns"))
+        finally:
+            c.close()
+
+        db = self.run.path("extract", self.source_id + ".db")
+        c = sqlite3.connect(db)
+        c.execute("ALTER TABLE data ADD COLUMN new_first TEXT")
+        c.execute("UPDATE _extraction_log SET columns=3 WHERE table_name='data'")
+        c.execute("""INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                  ("data",3,"new_first","New First",3,"C","TEXT","text",0,0))
+        c.commit()
+        c.close()
+
+        p2 = build_catalog(self.cfg, self.run.id, self.run.m)
+        c = sqlite3.connect(p2)
+        try:
+            table_after = c.execute("SELECT table_id FROM _tables").fetchone()[0]
+            cols_after = dict(c.execute("SELECT name,column_id FROM _columns"))
+        finally:
+            c.close()
+
+        self.assertEqual(table_before, table_after)
+        self.assertEqual(cols_before["id"], cols_after["id"])
+        self.assertEqual(cols_before["amount"], cols_after["amount"])
+        self.assertNotIn("new_first", cols_before)
+        self.assertIn("new_first", cols_after)
+
     def test_table_id_is_repeatable_for_same_schema(self):
         p1 = build_catalog(self.cfg, self.run.id, self.run.m)
         c = sqlite3.connect(p1)
