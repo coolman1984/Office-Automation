@@ -37,7 +37,8 @@ def load_pack(path):
     if not name or not version:
         raise Xl2aiError("E_RULE", f"{file}: [pack] needs non-empty name and version")
     return {"file": file, "name": name, "version": version,
-            "rules": list(raw.get("rule", [])), "kpis": list(raw.get("kpi", []))}
+            "rules": list(raw.get("rule", [])), "kpis": list(raw.get("kpi", [])),
+            "terms": list(raw.get("term", []))}
 
 
 def _maps(catalog, run_dir):
@@ -111,9 +112,19 @@ def run_packs(cfg, run_id, catalog_path=None):
     try:
         writer.execute("DELETE FROM _rule_results")
         writer.execute("DELETE FROM _kpi_results")
+        writer.execute("DELETE FROM _dictionary WHERE origin='pack'")
         dbs, tables = _maps(writer, run_dir)
         packs = [load_pack(p) for p in cfg.pack_paths()]
         for pack in packs:
+            for item in pack["terms"]:
+                term = str(item.get("term", "")).strip()
+                meaning = str(item.get("meaning", "")).strip()
+                if not term or not meaning:
+                    raise Xl2aiError("E_RULE", f"{pack['file']}: [[term]] needs term and meaning")
+                writer.execute("INSERT OR REPLACE INTO _dictionary VALUES (?,?,?,?,?,?,?,?,?)",
+                               (term, meaning, json.dumps(item.get("aliases", []), ensure_ascii=False, separators=(",", ":")),
+                                str(item.get("unit", "")), str(item.get("applies_to", "")),
+                                str(item.get("status", "confirmed")), "pack", pack["name"], pack["version"]))
             qc = _query_connection(run_dir, dbs, cfg.ai["query_timeout"])
             try:
                 for item in pack["rules"]:

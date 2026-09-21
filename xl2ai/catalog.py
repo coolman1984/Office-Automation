@@ -51,6 +51,10 @@ CREATE TABLE _relationships (
   id TEXT PRIMARY KEY, from_column TEXT, to_column TEXT, kind TEXT, containment REAL,
   status TEXT, method TEXT, score REAL, evidence TEXT
 );
+CREATE TABLE _dictionary (
+  term TEXT, meaning TEXT, aliases TEXT, unit TEXT, applies_to TEXT, status TEXT, origin TEXT,
+  pack TEXT, pack_version TEXT, PRIMARY KEY(term, pack)
+);
 CREATE TABLE _rule_results (
   rule_id TEXT, pack TEXT, pack_version TEXT, status TEXT, expected TEXT, actual TEXT,
   severity TEXT, message TEXT, evidence TEXT, PRIMARY KEY(rule_id, pack)

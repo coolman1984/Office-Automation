@@ -1,0 +1,197 @@
+"""Build a deterministic, token-budgeted AI context pack from catalog metadata only."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import sqlite3
+import sys
+
+from .core.config import load_config
+from .core.errors import Xl2aiError
+from .core.fsutil import atomic_write_json, atomic_write_text
+from .core.runs import current_run_id
+
+
+def _compact_json(obj):
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _est_tokens(obj):
+    return int(math.ceil(len(_compact_json(obj)) / 3.5))
+
+
+def _add_budgeted(payload, section, item, budget_chars, omitted, label):
+    payload.setdefault(section, []).append(item)
+    if len(_compact_json(payload)) > budget_chars:
+        payload[section].pop()
+        omitted[label] = omitted.get(label, 0) + 1
+        return False
+    return True
+
+
+def _render_markdown(p):
+    lines = ["# xl2ai context pack", "",
+             f"run: {p['run_id']} | hash: {p['hash']} | est tokens: {p['est_tokens']}", "", "## Sources"]
+    for s in p["sources"]:
+        lines.append(f"- {s['source_id']} | {s['kind']} | {s['size']} bytes | {s['mtime']}" +
+                     (" | reused" if s.get("reused") else ""))
+    lines += ["", "## Tables"]
+    for t in p["tables"]:
+        cols = ", ".join(f"{c['h']}={c['name']}:{c['type']}" for c in t.get("columns", []))
+        lines.append(f"- {t['h']} {t['table_id']} | {t['source_id']} / {t['sheet']} | {t['rows']} rows" +
+                     (f" | {cols}" if cols else ""))
+    if p.get("relationships"):
+        lines += ["", "## Relationships"]
+        for r in p["relationships"]:
+            lines.append(f"- {r['from']} -> {r['to']} | containment {r['containment']:.3f} | score {r['score']:.3f}")
+    if p.get("definitions"):
+        lines += ["", "## Definitions"]
+        for d in p["definitions"]:
+            lines.append(f"- {d['term']}: {d['meaning']}" + (f" [{d['unit']}]" if d.get("unit") else ""))
+    if p.get("kpis"):
+        lines += ["", "## KPIs"]
+        for k in p["kpis"]:
+            lines.append(f"- {k['pack']}/{k['id']} = {k['value']} {k.get('unit','')}".rstrip())
+    if p.get("rules"):
+        lines += ["", "## Rules"]
+        for r in p["rules"]:
+            lines.append(f"- {r['pack']}/{r['id']}: {r['status']}" + (f" | {r['message']}" if r.get("message") else ""))
+    if p.get("changes"):
+        lines += ["", "## Changes since previous trusted run"]
+        for c in p["changes"]:
+            lines.append(f"- {c['kind']} | {c['severity']} | {c['subject']}")
+    if p.get("quality"):
+        lines += ["", "## Data-quality warnings"]
+        for d in p["quality"]:
+            lines.append(f"- {d['severity']} {d['code']} | {d['subject']} | {d['message']}")
+    if p.get("omitted"):
+        lines += ["", "## Omitted to stay inside budget"]
+        for o in p["omitted"]:
+            lines.append(f"- {o['what']}: {o['count']} | use {o['use_tool']}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_context_pack(cfg, run_id, catalog_path=None):
+    run_dir = os.path.join(cfg.runs_dir, run_id)
+    path = catalog_path or os.path.join(run_dir, "catalog.db")
+    if not os.path.isfile(path):
+        raise Xl2aiError("E_STAGE_INPUT", "catalog not found")
+    con = sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
+    try:
+        budget_chars = int(cfg.ai["context_tokens"] * 3.2)
+        payload = {"contract_version": "1.0", "run_id": run_id, "sources": [], "tables": [],
+                   "relationships": [], "definitions": [], "kpis": [], "rules": [], "changes": [],
+                   "quality": [], "warnings": [], "omitted": []}
+        omitted = {}
+
+        source_rows = con.execute("""SELECT s.source_id,s.size,s.mtime,s.hash_mode,s.reused,
+                                            COALESCE((SELECT COUNT(*) FROM _tables t WHERE t.source_id=s.source_id),0)
+                                     FROM _sources s ORDER BY s.source_id""").fetchall()
+        for sid, size, mtime, hash_mode, reused, table_count in source_rows:
+            _add_budgeted(payload, "sources",
+                          {"source_id": sid, "kind": hash_mode, "size": int(size or 0), "mtime": mtime,
+                           "reused": bool(reused), "tables": int(table_count)}, budget_chars, omitted, "sources")
+
+        table_rows = con.execute("""SELECT table_id,source_id,sheet_name,row_count,column_count
+                                    FROM _tables ORDER BY table_id""").fetchall()
+        handles = {}
+        for i, (tid, sid, sheet, rows, ncols) in enumerate(table_rows, 1):
+            h = f"t{i}"
+            handles[tid] = h
+            cols = con.execute("""SELECT position,name,sql_type FROM _columns
+                                  WHERE table_id=? ORDER BY position""", (tid,)).fetchall()
+            item = {"h": h, "table_id": tid, "source_id": sid, "sheet": sheet,
+                    "rows": int(rows), "cols": int(ncols),
+                    "columns": [{"h": f"{h}.c{p}", "name": n, "type": typ} for p,n,typ in cols]}
+            if not _add_budgeted(payload, "tables", item, budget_chars, omitted, "tables"):
+                skinny = dict(item)
+                skinny["columns"] = []
+                if _add_budgeted(payload, "tables", skinny, budget_chars, omitted, "tables_without_columns"):
+                    omitted["columns"] = omitted.get("columns", 0) + len(cols)
+
+        col_handles = {}
+        for tid, h in handles.items():
+            for cid, pos in con.execute("SELECT column_id,position FROM _columns WHERE table_id=?", (tid,)):
+                col_handles[cid] = f"{h}.c{pos}"
+
+        for f,t,containment,score in con.execute(
+            "SELECT from_column,to_column,containment,score FROM _relationships ORDER BY score DESC,id"):
+            _add_budgeted(payload, "relationships",
+                          {"from": col_handles.get(f,f), "to": col_handles.get(t,t),
+                           "containment": round(float(containment),4), "score": round(float(score),4)},
+                          budget_chars, omitted, "relationships")
+
+        for term,meaning,aliases,unit,applies,status in con.execute(
+            "SELECT term,meaning,aliases,unit,applies_to,status FROM _dictionary ORDER BY term"):
+            _add_budgeted(payload, "definitions",
+                          {"term": term, "meaning": meaning, "aliases": json.loads(aliases or "[]"),
+                           "unit": unit, "applies_to": applies, "status": status},
+                          budget_chars, omitted, "definitions")
+
+        for kid,pack,value,unit,dims in con.execute(
+            "SELECT kpi_id,pack,value,unit,dims FROM _kpi_results ORDER BY pack,kpi_id"):
+            _add_budgeted(payload, "kpis",
+                          {"id": kid, "pack": pack, "value": value, "unit": unit, "dims": json.loads(dims or "{}")},
+                          budget_chars, omitted, "kpis")
+        for rid,pack,status,severity,message in con.execute(
+            "SELECT rule_id,pack,status,severity,message FROM _rule_results ORDER BY pack,rule_id"):
+            _add_budgeted(payload, "rules",
+                          {"id": rid, "pack": pack, "status": status, "severity": severity, "message": message},
+                          budget_chars, omitted, "rules")
+        for kind,severity,subject in con.execute(
+            "SELECT kind,severity,subject FROM _changes ORDER BY kind,subject"):
+            _add_budgeted(payload, "changes",
+                          {"kind": kind, "severity": severity, "subject": subject},
+                          budget_chars, omitted, "changes")
+        for code,severity,table_id,column_id,message in con.execute(
+            """SELECT code,severity,table_id,column_id,message FROM _dq_findings
+               WHERE severity IN ('warn','error') ORDER BY CASE severity WHEN 'error' THEN 0 ELSE 1 END,code,id"""):
+            subject = col_handles.get(column_id) or handles.get(table_id) or column_id or table_id
+            _add_budgeted(payload, "quality",
+                          {"code": code, "severity": severity, "subject": subject, "message": message},
+                          budget_chars, omitted, "quality")
+
+        use = {"sources":"query schema","tables":"query schema","tables_without_columns":"query describe",
+               "columns":"query describe","relationships":"query schema","definitions":"query schema",
+               "kpis":"query schema","rules":"query schema","changes":"query schema","quality":"query describe"}
+        payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
+                              for k,v in sorted(omitted.items()) if v]
+        base = dict(payload)
+        payload["hash"] = hashlib.sha256(_compact_json(base).encode()).hexdigest()[:16]
+        payload["est_tokens"] = _est_tokens(payload)
+        if payload["est_tokens"] > cfg.ai["context_tokens"]:
+            payload["warnings"].append("context core exceeds configured token budget; increase ai.context_tokens")
+        ai_dir = os.path.join(run_dir, "ai")
+        os.makedirs(ai_dir, exist_ok=True)
+        jp = os.path.join(ai_dir, "context_pack.json")
+        mp = os.path.join(ai_dir, "context_pack.md")
+        atomic_write_json(jp, payload)
+        atomic_write_text(mp, _render_markdown(payload))
+        return jp, mp, payload
+    finally:
+        con.close()
+
+
+def main(argv=None):
+    ap=argparse.ArgumentParser(prog="xl2ai pack",description="Build the compact AI context pack for a run.")
+    ap.add_argument("--config")
+    ap.add_argument("--run")
+    args=ap.parse_args(argv)
+    try:
+        cfg=load_config(args.config)
+        rid=args.run or current_run_id(cfg)
+        if not rid:
+            raise Xl2aiError("E_STAGE_INPUT","no current run")
+        jp,mp,p=build_context_pack(cfg,rid)
+    except Xl2aiError as e:
+        print(str(e),file=sys.stderr)
+        return 1
+    print(f"{mp}\n{jp}\nestimated tokens: {p['est_tokens']}")
+    return 0
+
+
+if __name__=="__main__":
+    sys.exit(main())

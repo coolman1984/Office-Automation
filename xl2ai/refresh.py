@@ -99,6 +99,15 @@ def materialize_reuse(src, dst):
         return "copy"
 
 
+def stage_contextpack(run, st, cfg, ctx):
+    from .contextpack import build_context_pack
+    jp, mp, payload = build_context_pack(cfg, run.id, ctx.get("catalog"))
+    st.artifact(jp)
+    st.artifact(mp)
+    st.detail("est_tokens", payload["est_tokens"])
+    st.detail("hash", payload["hash"])
+
+
 def stage_changes(run, st, cfg, ctx):
     from .changes import detect_changes
     path = detect_changes(cfg, run.id, catalog_path=ctx.get("catalog"))
@@ -203,7 +212,7 @@ def stage_extract(run, st, cfg, ctx):
 
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
           ("analyze", stage_analyze), ("relations", stage_relations), ("rules", stage_rules),
-          ("changes", stage_changes))
+          ("changes", stage_changes), ("contextpack", stage_contextpack))
 
 
 def run_refresh(cfg, force=False):
