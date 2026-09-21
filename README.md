@@ -1,50 +1,160 @@
 # xl2ai
 
-A local, offline "data preparation operating system for AI": unfamiliar business Excel files go in, a safe, verified,
-traceable SQLite dataset comes out, and (in later phases) a tiny AI Context Pack plus capped query tools so an AI
-never reads raw Excel or huge tables. Nothing here is specific to any one workbook; project knowledge lives in rule packs.
+Local, offline-first preparation layer between business Excel files and AI.
 
-## What works today (extraction + safe refresh lifecycle)
+The core idea is simple:
 
-```powershell
-python -m xl2ai extract "path\to\file.xlsx"            # one workbook -> <name>.db beside it
-python -m xl2ai extract "folder" -o out                # every workbook in a folder -> out\<name>.db
-python -m xl2ai extract file.xlsb --no-verify --sheet "Sheet 1"
-python -m xl2ai refresh                                # process configured sources; reuse exact unchanged inputs
-python -m xl2ai status                                 # current trusted run + freshness
-python -m xl2ai refresh --force                        # deliberately re-extract everything
+```
+Excel -> verified SQLite -> catalog/profile/quality -> keys & relations
+      -> rules/KPIs -> run-to-run changes -> compact AI context + safe query tools
 ```
 
-`refresh` takes a full SHA-256 fingerprint of every source and records extraction-affecting settings. If a source is exactly unchanged
-(path, hash, size, mtime, settings) and the previous promoted run fully passed, its trusted database is materialized
-into the new run with a hard link when possible (copy fallback) and Excel is not started for that source. Any doubt
-falls back to a normal extraction. Recurring refreshes therefore scale with what actually changed.
+Excel remains the source of truth. AI never needs to open the raw workbook or ingest a 100 MB table.
 
-Requires Windows, Excel, and `pip install pywin32`. It opens files read-only in a private Excel (works on DRM-wrapped
-files that no zip parser can read), survives Excel crashes, password prompts and phantom ranges, never modifies the source,
-never replaces the previous database on failure, and verifies the result against Excel itself.
-Exit codes: 0 ok, 1 file failed, 2 some sheets failed, 3 verification mismatch.
-Old entry point `python excel_to_sqlite.py ...` still works.
+## What works now
 
-## Roadmap
+- Excel COM extraction on Windows with a private Excel process, read-only open, crash/dialog handling and verification.
+- Incremental refresh: unchanged trusted sources are reused without reopening Excel.
+- Run history, lock, promotion gate and retention. A failed refresh never replaces the last trusted run.
+- Stable source/table/column catalog.
+- Column profiling and generic quality findings.
+- Candidate keys and conservative relationship inference.
+- Human-confirmed keys/relations through project rule packs.
+- Deterministic business rules, KPIs and dictionary terms.
+- Schema, volume, value, category, KPI and row-multiset change detection.
+- Compact token-budgeted AI context pack.
+- Read-only capped query tools with row, byte and time limits plus SQLite authorizer protection.
+- Trace from a returned row back to its Excel row.
+- Fast status and optional deep SHA-256 source-integrity check.
+- Human-readable project report and environment doctor.
+- Installable package and `xl2ai` command.
 
-`extract` + safe/incremental `refresh` (built) -> quality -> profile -> relations -> dictionary -> rules/KPIs ->
-change detection -> AI context pack -> safe query tools. Phases and gates: `ARCHITECTURE.md` section 6.
+## Install
+
+Python 3.11+ is required. Extraction additionally requires Windows and Microsoft Excel.
+
+```powershell
+python -m pip install -e .
+xl2ai --help
+```
+
+On Windows, the package installs `pywin32` automatically.
+
+## Start a project
+
+```powershell
+xl2ai init "C:\Data\Orders.xlsx" "C:\Data\Customers.xlsx" --name "Sales" --with-pack
+xl2ai doctor
+xl2ai refresh
+xl2ai report
+```
+
+A project normally contains:
+
+```
+xl2ai.toml
+packs/
+data/
+  current.json
+  runs/<run_id>/
+```
+
+## Daily use
+
+```powershell
+xl2ai status
+xl2ai status --deep
+xl2ai refresh
+xl2ai report
+xl2ai query schema
+xl2ai query describe <table-id>
+xl2ai query sample <table-id>
+xl2ai query aggregate <table-id> amount --op sum --group-by department
+xl2ai query compare
+xl2ai query trace <table-id> 25
+```
+
+`status` is deliberately fast and checks file size + modified time. `status --deep` recomputes full SHA-256 when you need the stronger guarantee.
+
+## Trust model
+
+The platform keeps four ideas separate:
+
+1. **Extracted**: what Excel actually returned.
+2. **Detected/inferred**: structure, candidate keys and relationships found by generic logic.
+3. **Confirmed**: knowledge explicitly declared by a human in a pack.
+4. **Calculated**: rules and KPIs produced deterministically by SQL/code.
+
+AI-facing output preserves those distinctions. It does not silently promote an inference into a business fact.
+
+## AI use
+
+Every trusted run can produce:
+
+```
+data/runs/<run_id>/ai/context_pack.md
+data/runs/<run_id>/ai/context_pack.json
+```
+
+The context pack is small by design. When more evidence is needed, use the capped query tools rather than giving the model the raw database.
+
+See `AI_USAGE.md`.
+
+## Business knowledge
+
+Generic code lives only in `xl2ai/`. Department/project knowledge lives in packs.
+
+A pack can define:
+
+- terms and meanings,
+- confirmed keys,
+- confirmed relationships,
+- deterministic assertions,
+- KPIs.
+
+See `BUSINESS_RULES.md` and `EXTENDING.md`.
+
+## Current known limits
+
+The platform warns instead of pretending when workbook logic is not fully represented.
+
+Still incomplete:
+
+- several logical tables inside one worksheet,
+- multi-row/complex headers with explicit region configuration,
+- full formula dependency capture,
+- pivot definition/source logic,
+- Power Query / Data Model semantics,
+- key-based row-level before/after values for confirmed keys,
+- a graphical UI.
+
+Current extraction does preserve the visible values and reports structural warning signals such as formulas, pivots and merged data cells.
+
+## Safety guarantees
+
+- source workbooks are opened read-only,
+- writes happen inside a new run folder,
+- promotion is atomic,
+- the previous trusted run survives failure,
+- raw SQL is read-only, capped and guarded by SQLite authorization,
+- business rows are never copied into the context pack,
+- row-diff fingerprints store hashes/counts, not row content.
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests
+```
+
+The CI matrix runs the COM-free platform tests on Windows and Linux with Python 3.11 and 3.12. Real Excel integration/golden tests are documented in `TESTING.md`.
 
 ## Documents
 
-| File | Purpose | Status |
-|---|---|---|
-| `ARCHITECTURE.md` | principles, review, module structure, token strategy, roadmap | written |
-| `DATA_CONTRACT.md` | what each stage reads/writes, ids, evidence, error codes | written (extract built, rest target) |
-| `EDGE_CASES.md` | test matrix with honest coverage status | written |
-| `TESTING.md` | how to run, rules for tests | written |
-| `CHANGELOG.md` | what changed, incl. output-affecting changes | written |
-| `skills/` | instructions for AI agents, one folder per tool | extract stage only |
-| `AI_USAGE.md`, `EXTENDING.md`, `BUSINESS_RULES.md` | written when the features they describe exist (phases 5-7) | planned |
-
-## Layout
-
-`xl2ai/` generic platform (no domain words; enforced by a test) | `tests/` unit, integration, golden, structure |
-`skills/` agent instructions | `Price Comparison Data/` and `output/` a demanding specimen and its output (not the spec) |
-`extract_excel.py`, `test_output/` a superseded first draft (contains a known truncation bug; safe to delete).
+- `ARCHITECTURE.md` design rules and remaining architectural work.
+- `DATA_CONTRACT.md` persisted contracts and evidence conventions.
+- `EDGE_CASES.md` edge-case coverage.
+- `TESTING.md` test strategy.
+- `AI_USAGE.md` safe AI workflow.
+- `BUSINESS_RULES.md` rule-pack format.
+- `EXTENDING.md` how to add a new project/capability.
+- `CHANGELOG.md` shipped changes.
