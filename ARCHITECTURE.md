@@ -97,7 +97,8 @@ specimen files; (c) the whole platform test suite passes with **no pack installe
 Every refresh creates `data/runs/<run_id>/` with `manifest.json` (stages, status, timings, input fingerprints:
 path, size, mtime, sha256). Stages write only inside their run folder. The run is **promoted** by atomically
 rewriting `data/current.json` only after all required stages pass. A failed/partial run stays inspectable and never
-becomes `current`. Last N runs are kept (default 3). A lock file prevents concurrent refreshes of the same project.
+becomes `current`. Last N runs are kept (default 3). A lock file prevents concurrent refreshes of the same project;
+a live owner is never displaced based on lock age alone.
 
 ### 3.2 Config layering
 

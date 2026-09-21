@@ -29,7 +29,11 @@ def now_iso():
 
 # ------------------------------------------------------------------------------------------------ lock
 class Lock:
-    """Exclusive refresh lock: O_EXCL create; a lock whose owner is dead (or too old) is taken over."""
+    """Exclusive refresh lock.
+
+    A live owner is never displaced just because the lock is old. Age is advisory only; takeover requires the
+    recorded owner process to be gone (or an unreadable half-created lock to remain abandoned long enough).
+    """
 
     def __init__(self, cfg):
         self.cfg, self.path, self.held = cfg, cfg.lock_file, False
@@ -48,8 +52,7 @@ class Lock:
                 return True
         if not pid_alive(info.get("pid")):
             return True
-        limit = self.cfg.lock_stale_hours * 3600
-        return bool(limit) and time.time() - info.get("epoch", time.time()) > limit
+        return False
 
     def acquire(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -65,9 +68,14 @@ class Lock:
                     except OSError:
                         pass
                     continue
+                age = time.time() - float(info.get("epoch", time.time()))
+                limit = self.cfg.lock_stale_hours * 3600
+                old_note = ""
+                if limit and age > limit:
+                    old_note = f"; lock is older than {self.cfg.lock_stale_hours}h but owner pid is still alive"
                 raise Xl2aiError("E_LOCKED", f"another refresh is running (pid {info.get('pid')}, "
-                                             f"since {info.get('started')})",
-                                 "wait for it, or delete the lock file only if you are sure nothing is running") from None
+                                             f"since {info.get('started')}{old_note})",
+                                 "wait for it; never delete a lock while its owner process is alive") from None
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"pid": os.getpid(), "started": now_iso(), "epoch": time.time()}, f)
             self.held = True

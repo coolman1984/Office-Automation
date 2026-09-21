@@ -215,17 +215,19 @@ class TestLock(unittest.TestCase):
         with runsmod.Lock(self.cfg):
             self.assertTrue(os.path.exists(self.cfg.lock_file))
 
-    def test_stale_by_age_is_taken_over_even_if_process_exists(self):
-        # lock_stale_hours=1: our own pid is alive (so liveness alone would not free it), but the lock is 2h old
+    def test_old_lock_is_not_taken_over_while_owner_is_alive(self):
+        # Age may indicate a suspiciously long run, but it is never permission to overlap two live refreshes.
         cfg = make_cfg(self.tmp.name, "[refresh]\nlock_stale_hours = 1\n")
         os.makedirs(os.path.dirname(cfg.lock_file), exist_ok=True)
         with open(cfg.lock_file, "w", encoding="utf-8") as f:
             json.dump({"pid": os.getpid(), "started": "x", "epoch": time.time() - 7200}, f)
-        with runsmod.Lock(cfg):
-            self.assertTrue(os.path.exists(cfg.lock_file))
+        with self.assertRaises(Xl2aiError) as ctx:
+            runsmod.Lock(cfg).acquire()
+        self.assertEqual(ctx.exception.code, "E_LOCKED")
+        self.assertIn("owner pid is still alive", ctx.exception.message)
 
     def test_lock_stale_hours_zero_disables_the_age_check(self):
-        """0 means 'no age-based grace' (liveness-only), not 'expire instantly' — documented, tested explicitly."""
+        """0 disables the old-lock advisory threshold; live-owner liveness remains authoritative."""
         cfg = make_cfg(self.tmp.name, "[refresh]\nlock_stale_hours = 0\n")
         os.makedirs(os.path.dirname(cfg.lock_file), exist_ok=True)
         with open(cfg.lock_file, "w", encoding="utf-8") as f:

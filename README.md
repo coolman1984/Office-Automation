@@ -15,7 +15,7 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 
 - Excel COM extraction on Windows with a private Excel process, read-only open, crash/dialog handling and verification.
 - Incremental refresh: unchanged trusted sources are reused without reopening Excel.
-- Run history, lock, promotion gate and retention. A failed refresh never replaces the last trusted run.
+- Run history, live-owner lock, promotion gate and retention. A failed refresh never replaces the last trusted run.
 - Stable source/table/column catalog.
 - Column profiling and generic quality findings.
 - Candidate keys and conservative relationship inference.
