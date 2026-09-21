@@ -161,9 +161,6 @@ def collect_files(paths):
 
 
 def main(argv=None):
-    if os.name != "nt" or not PYWIN32_AVAILABLE:
-        log("ERROR", "Excel extraction requires Windows, Microsoft Excel and pywin32. Metadata/query commands can still run.")
-        return 1
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -180,6 +177,9 @@ def main(argv=None):
     ap.add_argument("--open-timeout", type=int, default=180, help="seconds before a hung open is killed")
     ap.add_argument("--visible", action="store_true", help="show the Excel window (debugging)")
     opts = ap.parse_args(argv)
+    if os.name != "nt" or not PYWIN32_AVAILABLE:
+        log("ERROR", "Excel extraction requires Windows, Microsoft Excel and pywin32. Metadata/query commands can still run.")
+        return 1
     opts.sheets = {s.strip().lower() for s in opts.sheet}
     opts.wrapper_prefixes = wrapper_prefixes_or_empty()       # from xl2ai.toml if one is found, else none
 

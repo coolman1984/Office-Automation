@@ -96,8 +96,19 @@ class Lock:
 def list_runs(cfg):
     if not os.path.isdir(cfg.runs_dir):
         return []
-    return sorted((d for d in os.listdir(cfg.runs_dir) if os.path.isfile(os.path.join(cfg.runs_dir, d, "manifest.json"))),
-                  reverse=True)
+    items = []
+    for d in os.listdir(cfg.runs_dir):
+        manifest = os.path.join(cfg.runs_dir, d, "manifest.json")
+        if not os.path.isfile(manifest):
+            continue
+        try:
+            m = read_json(manifest)
+            order = float(m.get("started_epoch", os.path.getmtime(manifest)))
+        except (OSError, ValueError, TypeError):
+            order = os.path.getmtime(manifest)
+        items.append((order, d))
+    items.sort(reverse=True)
+    return [d for _, d in items]
 
 
 def load_manifest(cfg, run_id):
@@ -176,7 +187,7 @@ class Run:
         run_id = time.strftime("%Y%m%dT%H%M%S") + "-" + os.urandom(2).hex()
         mem = memory_status()
         manifest = {"contract_version": CONTRACT_VERSION, "run_id": run_id, "project": cfg.project,
-                    "started": now_iso(), "finished": None, "status": "running", "promoted": False,
+                    "started": now_iso(), "started_epoch": time.time(), "finished": None, "status": "running", "promoted": False,
                     "config_fingerprint": cfg.fingerprint(), "extract_fingerprint": cfg.extract_fingerprint(),
                     "platform": {"python": platform.python_version(), "pid": os.getpid(), "memory": mem},
                     "inputs": [], "stages": []}

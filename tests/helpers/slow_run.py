@@ -19,6 +19,6 @@ if __name__ == "__main__":
     seconds = float(sys.argv[2]) if len(sys.argv) > 2 else 60.0
     with Lock(cfg):
         run = Run.create(cfg)
-        print(f"RUN_ID={run.id}", flush=True)     # the test scans for this marker; other lines may be log output
         with run.stage("slow"):
+            print(f"RUN_ID={run.id}", flush=True)  # emitted only after the stage is durably recorded as running
             time.sleep(seconds)

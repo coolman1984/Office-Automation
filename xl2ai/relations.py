@@ -79,7 +79,8 @@ def infer_relations(cfg, run_id, catalog_path=None):
                 parents.append((by_id[ids[0]], float(uniqueness)))
         for child in cols:
             child_id, child_table_id, child_name, child_type, child_kind, child_table, child_db, child_distinct, child_rows = child
-            if int(child_distinct or 0) < 5:
+            min_domain = 3 if int(child_rows or 0) < 50 else 5
+            if int(child_distinct or 0) < min_domain:
                 continue
             nf = _norm(child_name)
             for parent, uniqueness in parents:
@@ -96,7 +97,7 @@ def infer_relations(cfg, run_id, catalog_path=None):
                 parent_path = os.path.join(run_dir, parent_db.replace("/", os.sep))
                 with _ro(child_path) as cs, _ro(parent_path) as ps:
                     vals = _sample_values(cs, child_table, child_name, cfg.analysis["relation_sample"])
-                    if len(vals) < 5:
+                    if len(vals) < min_domain:
                         continue
                     match = _matched(ps, parent_table, parent_name, vals)
                 containment = match / len(vals)

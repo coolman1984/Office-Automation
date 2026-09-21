@@ -246,7 +246,7 @@ class TestHardKillGate(unittest.TestCase):
 
     def test_killed_run_never_promotes_and_is_reaped(self):
         helper = os.path.join(ROOT, "tests", "helpers", "slow_run.py")
-        proc = subprocess.Popen([sys.executable, helper, self.cfg.path, "60"], cwd=ROOT,
+        proc = subprocess.Popen([sys.executable, "-u", helper, self.cfg.path, "60"], cwd=ROOT,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             run_id = None
