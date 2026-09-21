@@ -15,7 +15,7 @@ python -m xl2ai status                                 # current trusted run + f
 python -m xl2ai refresh --force                        # deliberately re-extract everything
 ```
 
-`refresh` fingerprints every source and records extraction-affecting settings. If a source is exactly unchanged
+`refresh` takes a full SHA-256 fingerprint of every source and records extraction-affecting settings. If a source is exactly unchanged
 (path, hash, size, mtime, settings) and the previous promoted run fully passed, its trusted database is materialized
 into the new run with a hard link when possible (copy fallback) and Excel is not started for that source. Any doubt
 falls back to a normal extraction. Recurring refreshes therefore scale with what actually changed.

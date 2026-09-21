@@ -7,6 +7,8 @@ regenerated only together with an entry here.
 
 * `xl2ai refresh` now skips Excel entirely for a source when the previous promoted run passed and the source path,
   SHA-256, size, mtime and extraction-affecting settings are all unchanged.
+* Source fingerprinting now uses full SHA-256 by default, including files above 256 MB; the former first/last-chunk
+  shortcut remains available only as explicit opt-in and is never used by normal refresh caching.
 * Reused databases are materialized inside the new run (NTFS hard link when possible, copy fallback), so retention can
   safely remove old runs without breaking the current dataset.
 * Reuse is recorded per source in the manifest with `reused`, `reused_from_run` and `reuse_mode`.

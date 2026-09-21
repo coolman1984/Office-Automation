@@ -27,12 +27,17 @@ def read_json(path):
         return json.load(f)
 
 
-def sha256_file(path, quick_above=256 * 1024 * 1024, chunk=1024 * 1024):
-    """(hexdigest, mode). Files above `quick_above` bytes get a quick fingerprint: size + first and last chunk."""
+def sha256_file(path, quick_above=None, chunk=1024 * 1024):
+    """(hexdigest, mode). Full SHA-256 is the safe default; quick mode is explicit opt-in.
+
+    Incremental refresh uses this fingerprint as a correctness boundary: if it says a source is unchanged, Excel may
+    not be opened at all. A first/last-chunk fingerprint is therefore not strong enough as the default, especially for
+    large business workbooks where changes can occur anywhere in the file.
+    """
     size = os.path.getsize(path)
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        if size <= quick_above:
+        if quick_above is None or size <= quick_above:
             for block in iter(lambda: f.read(chunk), b""):
                 h.update(block)
             return h.hexdigest(), "full"
