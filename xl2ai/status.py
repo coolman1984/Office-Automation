@@ -13,10 +13,11 @@ import sys
 
 from .core.config import load_config
 from .core.errors import Xl2aiError
+from .core.fsutil import sha256_file
 from .core.runs import current_run_id, list_runs, load_manifest
 
 
-def compute_status(cfg):
+def compute_status(cfg, deep=False):
     out = {"project": cfg.project, "data_dir": cfg.data_dir, "current": None, "sources_fresh": None,
            "changes": [], "last_attempt": None}
     runs = list_runs(cfg)
@@ -38,8 +39,15 @@ def compute_status(cfg):
             out["changes"].append({"path": inp["path"], "reason": "missing"})
             continue
         mtime = dt.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")
-        if st.st_size != inp["size"] or mtime != inp["mtime"]:
+        stat_changed = st.st_size != inp["size"] or mtime != inp["mtime"]
+        if stat_changed:
             out["changes"].append({"path": inp["path"], "reason": "modified"})
+            continue
+        if deep:
+            digest, mode = sha256_file(inp["path"])
+            if digest != inp.get("sha256"):
+                out["changes"].append({"path": inp["path"], "reason": "content_changed_same_metadata",
+                                       "hash_mode": mode})
     out["sources_fresh"] = not out["changes"]
     if out["changes"]:
         return out, 2
@@ -53,13 +61,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="xl2ai status", description="Show the current dataset and its freshness.")
     ap.add_argument("--config", help="path to xl2ai.toml (default: discovered upward from the current folder)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--deep", action="store_true",
+                    help="recompute full SHA-256 for every source, even when size/mtime look unchanged")
     args = ap.parse_args(argv)
     try:
         cfg = load_config(args.config)
     except Xl2aiError as e:
         print(f"{e}", file=sys.stderr)
         return 5
-    out, code = compute_status(cfg)
+    out, code = compute_status(cfg, deep=args.deep)
     if args.json:
         print(json.dumps(out, indent=1, ensure_ascii=False))
         return code
@@ -70,7 +80,8 @@ def main(argv=None):
     else:
         print(f"current dataset: {cur['run_id']} ({cur['status']}, finished {cur['finished']})")
         print("stages: " + " | ".join(f"{k} {v}" for k, v in cur["stages"].items()))
-        print("sources: " + ("fresh" if out["sources_fresh"] else "CHANGED since this run -> refresh"))
+        mode = "deep SHA-256" if args.deep else "fast metadata"
+        print("sources: " + ("fresh" if out["sources_fresh"] else "CHANGED since this run -> refresh") + f" ({mode})")
         for c in out["changes"]:
             print(f"  - {c['reason']}: {c['path']}")
         for d in cur["databases"]:

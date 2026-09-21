@@ -40,3 +40,4 @@ jobs:
           tests.test_context_query
           tests.test_init_doctor
           tests.test_report
+          tests.test_status
