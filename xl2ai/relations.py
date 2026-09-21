@@ -13,6 +13,7 @@ import sys
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id
+from .core.sqliteutil import ro_connection
 
 
 def q(name):
@@ -29,10 +30,6 @@ def _family(sql_type, kind):
     if str(sql_type).upper() in ("INTEGER", "REAL"):
         return "number"
     return "text"
-
-
-def _ro(path):
-    return sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
 
 
 def _sample_values(src, table, column, limit):
@@ -95,7 +92,7 @@ def infer_relations(cfg, run_id, catalog_path=None):
                     continue
                 child_path = os.path.join(run_dir, child_db.replace("/", os.sep))
                 parent_path = os.path.join(run_dir, parent_db.replace("/", os.sep))
-                with _ro(child_path) as cs, _ro(parent_path) as ps:
+                with ro_connection(child_path) as cs, ro_connection(parent_path) as ps:
                     vals = _sample_values(cs, child_table, child_name, cfg.analysis["relation_sample"])
                     if len(vals) < min_domain:
                         continue

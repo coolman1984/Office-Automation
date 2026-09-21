@@ -60,9 +60,17 @@ class TestCatalog(unittest.TestCase):
 
     def test_table_id_is_repeatable_for_same_schema(self):
         p1 = build_catalog(self.cfg, self.run.id, self.run.m)
-        a = sqlite3.connect(p1).execute("SELECT table_id FROM _tables").fetchone()[0]
+        c = sqlite3.connect(p1)
+        try:
+            a = c.execute("SELECT table_id FROM _tables").fetchone()[0]
+        finally:
+            c.close()
         p2 = build_catalog(self.cfg, self.run.id, self.run.m)
-        b = sqlite3.connect(p2).execute("SELECT table_id FROM _tables").fetchone()[0]
+        c = sqlite3.connect(p2)
+        try:
+            b = c.execute("SELECT table_id FROM _tables").fetchone()[0]
+        finally:
+            c.close()
         self.assertEqual(a, b)
 
 

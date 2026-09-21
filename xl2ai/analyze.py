@@ -12,6 +12,7 @@ import sys
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id
+from .core.sqliteutil import ro_connection
 
 
 NULL_TOKENS = ("n/a", "na", "null", "none", "-", "--", "nil", "(blank)", "blank")
@@ -27,10 +28,6 @@ def _json(value):
 
 def _finding_id(code, subject):
     return hashlib.sha1(f"{code}|{subject}".encode()).hexdigest()[:20]
-
-
-def _ro(path):
-    return sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
 
 
 def _value(v):
@@ -100,7 +97,7 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                                 FROM _tables ORDER BY table_id""").fetchall()
         for table_id, table_name, db_rel, row_count, header_row, column_count in tables:
             src_path = os.path.join(run_dir, db_rel.replace("/", os.sep))
-            with _ro(src_path) as src:
+            with ro_connection(src_path) as src:
                 if header_row is None:
                     _add_finding(con, "DQ_HEADER_UNDETECTED", "info", table_id, None, 1, [],
                                  "no header row was detected; generated column names may need confirmation")

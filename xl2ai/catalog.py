@@ -15,6 +15,7 @@ import sys
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id, load_manifest
+from .core.sqliteutil import ro_connection
 
 DDL = """
 CREATE TABLE _catalog_meta (key TEXT PRIMARY KEY, value TEXT);
@@ -77,10 +78,6 @@ def q(name):
     return '"' + str(name).replace('"', '""') + '"'
 
 
-def _ro(path):
-    return sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
-
-
 def _schema_fingerprint(columns):
     body = [(int(c["position"]), c["sql_name"], c["sql_type"], c["kind"], int(c["xl_col"])) for c in columns]
     return hashlib.sha256(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
@@ -119,7 +116,7 @@ def build_catalog(cfg, run_id, manifest=None):
                         (sid, inp.get("path"), inp.get("sha256"), inp.get("size"), inp.get("mtime"), inp.get("hash_mode"),
                          rec["db"], int(bool(rec.get("reused"))), rec.get("reused_from_run")))
             srcdb = os.path.join(run_dir, rec["db"].replace("/", os.sep))
-            with _ro(srcdb) as src:
+            with ro_connection(srcdb) as src:
                 logs = src.execute("""SELECT sheet_name, table_name, data_rows, columns, header_row, visibility
                                       FROM _extraction_log
                                       WHERE status='extracted' AND table_name IS NOT NULL

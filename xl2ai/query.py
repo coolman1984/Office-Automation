@@ -11,6 +11,7 @@ import time
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id
+from .core.sqliteutil import ro_connection
 
 
 def q(name):
@@ -29,7 +30,7 @@ def _run_paths(cfg, run_id=None):
 
 
 def _catalog(cat):
-    return sqlite3.connect(f"file:{os.path.abspath(cat)}?mode=ro", uri=True)
+    return ro_connection(cat)
 
 
 def _resolve_table(cat, selector):
@@ -49,7 +50,7 @@ def _resolve_table(cat, selector):
 
 def _source_db(run_dir, db_rel):
     path=os.path.join(run_dir,db_rel.replace("/",os.sep))
-    return sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro",uri=True)
+    return ro_connection(path)
 
 
 def _envelope(tool, columns, rows, started, cfg, evidence=None, total_rows=None, truncated=False, hint=""):
