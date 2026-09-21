@@ -5,7 +5,7 @@
 * Added run catalog with stable source/table/column identities.
 * Added profiling, generic data-quality findings, candidate keys and conservative relationship inference.
 * Added TOML rule packs with confirmed terms, keys, relationships, deterministic rules and KPIs.
-* Added run-to-run source/schema/volume/value/category/KPI and exact row-multiset change detection.
+* Added run-to-run source/schema/volume/value/category/distribution/KPI and exact row-multiset change detection.
 * Added compact token-budgeted AI context pack and capped schema/describe/sample/aggregate/compare/trace/SQL tools.
 * Added SQLite read-only authorizer protection for AI/rule SQL.
 * Added project init, doctor, report and deep SHA-256 status verification.

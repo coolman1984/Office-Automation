@@ -96,6 +96,12 @@ class TestRunFinishAndPromotion(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_empty_run_never_promotes(self):
+        run = runsmod.Run.create(self.cfg)
+        self.assertFalse(run.finish())
+        self.assertEqual(run.m["status"], "failed")
+        self.assertIsNone(runsmod.current_run_id(self.cfg))
+
     def test_all_passed_promotes(self):
         run = runsmod.Run.create(self.cfg)
         with run.stage("a"):

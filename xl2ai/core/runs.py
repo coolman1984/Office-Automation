@@ -229,7 +229,10 @@ class Run:
     def finish(self):
         """Decide the run status and promote it if (and only if) it earned it. Returns True if promoted."""
         statuses = {s["status"] for s in self.m["stages"]}
-        if statuses <= {"passed"}:
+        if not statuses:
+            status = "failed"
+            self.m.setdefault("notes", []).append("run had no stages and cannot be promoted")
+        elif statuses <= {"passed"}:
             status = "passed"
         elif statuses & {"failed", "interrupted", "running"}:
             status = "failed"

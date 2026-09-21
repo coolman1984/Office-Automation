@@ -47,7 +47,7 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_dictionary` | term, meaning, aliases[], unit, applies_to (column_id patterns), status, origin (`pack|config|auto`) |
 | `_rule_results` | rule_id, pack, pack_version, status (`pass|fail|error|skipped`), expected, actual, tolerance, evidence |
 | `_kpi_results` | kpi_id, value, unit, dims, definition_ref, evidence |
-| `_changes` | kind (`schema|volume|value|category|kpi|source`), severity, subject, before, after, evidence |
+| `_changes` | kind (`schema|volume|value|row|category|distribution|kpi|source|baseline`), severity, subject, before, after, evidence |
 
 ## 4. Run manifest [phase 1] `manifest.json`
 

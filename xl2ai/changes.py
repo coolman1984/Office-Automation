@@ -127,16 +127,35 @@ def detect_changes(cfg, run_id, previous_run_id=None, catalog_path=None):
                         _insert(con, "row", "info", subject, {"removed": removed}, {"added": added},
                                 {"method": "row_hash_multiset", "content_not_stored": True})
 
-                old_cols = {r[0]: r[1] for r in prev.execute(
-                    """SELECT c.name,p.top_k FROM _columns c JOIN _profile_columns p ON p.column_id=c.column_id
+                old_cols = {r[0]: (r[1], int(r[2] or 0)) for r in prev.execute(
+                    """SELECT c.name,p.top_k,p.distinct_count
+                       FROM _columns c JOIN _profile_columns p ON p.column_id=c.column_id
                        WHERE c.table_id=?""", (o[0],))}
-                new_cols = {r[0]: r[1] for r in con.execute(
-                    """SELECT c.name,p.top_k FROM _columns c JOIN _profile_columns p ON p.column_id=c.column_id
+                new_cols = {r[0]: (r[1], int(r[2] or 0)) for r in con.execute(
+                    """SELECT c.name,p.top_k,p.distinct_count
+                       FROM _columns c JOIN _profile_columns p ON p.column_id=c.column_id
                        WHERE c.table_id=?""", (n[0],))}
                 for col in sorted(set(old_cols) & set(new_cols)):
-                    if old_cols[col] != new_cols[col]:
-                        _insert(con, "category", "info", f"{subject}.{col}",
-                                json.loads(old_cols[col] or "[]"), json.loads(new_cols[col] or "[]"))
+                    old_top_raw, old_distinct = old_cols[col]
+                    new_top_raw, new_distinct = new_cols[col]
+                    if old_top_raw == new_top_raw:
+                        continue
+                    old_top = json.loads(old_top_raw or "[]")
+                    new_top = json.loads(new_top_raw or "[]")
+                    old_values = [x[0] for x in old_top]
+                    new_values = [x[0] for x in new_top]
+                    old_complete = old_distinct <= len(old_top)
+                    new_complete = new_distinct <= len(new_top)
+                    item_subject = f"{subject}.{col}"
+                    if old_complete and new_complete and set(map(str, old_values)) != set(map(str, new_values)):
+                        _insert(con, "category", "info", item_subject, old_values, new_values,
+                                {"method": "complete_domain", "old_distinct": old_distinct,
+                                 "new_distinct": new_distinct})
+                    else:
+                        _insert(con, "distribution", "info", item_subject, old_top, new_top,
+                                {"method": "top_k_frequency",
+                                 "complete_domain_before": old_complete,
+                                 "complete_domain_after": new_complete})
 
             old_k = {(r[0],r[1]): r[2] for r in prev.execute("SELECT kpi_id,pack,value FROM _kpi_results")}
             new_k = {(r[0],r[1]): r[2] for r in con.execute("SELECT kpi_id,pack,value FROM _kpi_results")}

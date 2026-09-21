@@ -21,7 +21,7 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Candidate keys and conservative relationship inference.
 - Human-confirmed keys/relations through project rule packs.
 - Deterministic business rules, KPIs and dictionary terms.
-- Schema, volume, value, category, KPI and row-multiset change detection.
+- Schema, volume, value, category-membership, distribution, KPI and row-multiset change detection.
 - Compact token-budgeted AI context pack.
 - Read-only capped query tools with row, byte and time limits plus SQLite authorizer protection.
 - Trace from a returned row back to its Excel row.

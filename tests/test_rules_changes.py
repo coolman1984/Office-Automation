@@ -92,13 +92,13 @@ class TestChanges(unittest.TestCase):
 
     def tearDown(self): self.tmp.cleanup()
 
-    def _cat(self,run,rows,schema,rowfp,kpi):
+    def _cat(self,run,rows,schema,rowfp,kpi,top='[["A",3],["B",2]]',distinct=2):
         p=run.path("catalog.db"); c=sqlite3.connect(p); c.executescript(DDL)
         c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",("s","x","hash"+str(rows),1,"t","full","x.db",0,None))
         c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",("t","s","Sheet1","data","x.db",rows,1,1,"visible",schema))
         c.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",("t.c1","t",1,"category","Category",1,"A","TEXT","text",rows,0))
         c.execute("INSERT INTO _profile_columns VALUES (?,?,?,?,?,?,?,?,?)",
-                  ("t.c1",rows,0,2,"A","B",None,'[["A",3],["B",2]]','["A","B"]'))
+                  ("t.c1",rows,0,distinct,"A","B",None,top,'["A","B"]'))
         c.execute("INSERT INTO _table_profiles VALUES (?,?,?,?)",("t",rows,rowfp,"multiset_sha256"))
         hashes=[("same",min(rows,4))]
         if rows <= 5:
@@ -115,6 +115,26 @@ class TestChanges(unittest.TestCase):
         kinds={r[0] for r in c.execute("SELECT kind FROM _changes")}
         c.close()
         self.assertTrue({"source","schema","volume","value","row","kpi"}.issubset(kinds))
+
+    def test_distinguishes_category_membership_from_frequency_shift(self):
+        r3=Run.create(self.cfg)
+        r4=Run.create(self.cfg)
+        self._cat(r3,5,"same","same","10",top='[["A",3],["B",2]]',distinct=2)
+        self._cat(r4,5,"same","same","10",top='[["A",2],["B",3]]',distinct=2)
+        detect_changes(self.cfg,r4.id,previous_run_id=r3.id)
+        c=sqlite3.connect(r4.path("catalog.db"))
+        kinds={r[0] for r in c.execute("SELECT kind FROM _changes")}
+        c.close()
+        self.assertIn("distribution",kinds)
+        self.assertNotIn("category",kinds)
+
+        r5=Run.create(self.cfg)
+        self._cat(r5,5,"same","same","10",top='[["A",2],["C",3]]',distinct=2)
+        detect_changes(self.cfg,r5.id,previous_run_id=r4.id)
+        c=sqlite3.connect(r5.path("catalog.db"))
+        kinds={r[0] for r in c.execute("SELECT kind FROM _changes")}
+        c.close()
+        self.assertIn("category",kinds)
 
 
 if __name__=="__main__":
