@@ -20,10 +20,102 @@ from .core.runs import current_run_id
 from .core.sqliteutil import install_readonly_authorizer
 
 TABLE_TOKEN = re.compile(r"\{\{table:([^/{}]+)/([^{}]+)\}\}")
+PACK_FIELDS = {"name", "version"}
+ITEM_FIELDS = {
+    "term": {"term", "meaning", "aliases", "unit", "applies_to", "status"},
+    "key": {"table", "columns"},
+    "relation": {"from_table", "from_column", "to_table", "to_column", "kind"},
+    "rule": {"id", "sql", "expect", "severity", "message"},
+    "kpi": {"id", "sql", "unit", "dims"},
+}
+SEVERITIES = {"info", "warn", "error"}
+EXPECTATIONS = {"zero", "nonzero", "true", "not_null"}
 
 
 def q(name):
     return '"' + str(name).replace('"', '""') + '"'
+
+
+def _array_of_tables(raw, section, file):
+    value = raw.get(section, [])
+    if not isinstance(value, list) or any(not isinstance(x, dict) for x in value):
+        raise Xl2aiError("E_RULE", f"{file}: [[{section}]] must be an array of tables")
+    allowed = ITEM_FIELDS[section]
+    for i, item in enumerate(value, 1):
+        unknown = sorted(set(item) - allowed)
+        if unknown:
+            raise Xl2aiError("E_RULE", f"{file}: [[{section}]] #{i} has unknown field(s): {', '.join(unknown)}")
+    return value
+
+
+def _require_text(item, key, file, section, index):
+    value = item.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise Xl2aiError("E_RULE", f"{file}: [[{section}]] #{index} needs non-empty '{key}'")
+    return value.strip()
+
+
+def _validate_sql_shape(value, file, section, index):
+    sql = _require_text(value, "sql", file, section, index)
+    low = sql.lstrip().lower()
+    if not (low.startswith("select") or low.startswith("with")):
+        raise Xl2aiError("E_RULE", f"{file}: [[{section}]] #{index} SQL must start with SELECT/WITH")
+    if ";" in sql.rstrip(";"):
+        raise Xl2aiError("E_RULE", f"{file}: [[{section}]] #{index} SQL must contain one statement")
+
+
+def _validate_pack(pack):
+    file = pack["file"]
+
+    seen = set()
+    for i, item in enumerate(pack["rules"], 1):
+        rid = _require_text(item, "id", file, "rule", i)
+        if rid in seen:
+            raise Xl2aiError("E_RULE", f"{file}: duplicate rule id '{rid}'")
+        seen.add(rid)
+        _validate_sql_shape(item, file, "rule", i)
+        severity = str(item.get("severity", "warn"))
+        if severity not in SEVERITIES:
+            raise Xl2aiError("E_RULE", f"{file}: rule '{rid}' severity must be info|warn|error")
+        expect = str(item.get("expect", "zero"))
+        if expect not in EXPECTATIONS and not expect.startswith("equals:"):
+            raise Xl2aiError("E_RULE", f"{file}: rule '{rid}' has unknown expectation '{expect}'")
+
+    seen = set()
+    for i, item in enumerate(pack["kpis"], 1):
+        kid = _require_text(item, "id", file, "kpi", i)
+        if kid in seen:
+            raise Xl2aiError("E_RULE", f"{file}: duplicate KPI id '{kid}'")
+        seen.add(kid)
+        _validate_sql_shape(item, file, "kpi", i)
+        dims = item.get("dims", {})
+        if not isinstance(dims, dict):
+            raise Xl2aiError("E_RULE", f"{file}: KPI '{kid}' dims must be a table/object")
+
+    seen = set()
+    for i, item in enumerate(pack["terms"], 1):
+        term = _require_text(item, "term", file, "term", i)
+        _require_text(item, "meaning", file, "term", i)
+        if term in seen:
+            raise Xl2aiError("E_RULE", f"{file}: duplicate term '{term}'")
+        seen.add(term)
+        aliases = item.get("aliases", [])
+        if not isinstance(aliases, list) or any(not isinstance(x, str) for x in aliases):
+            raise Xl2aiError("E_RULE", f"{file}: term '{term}' aliases must be a list of strings")
+
+    for i, item in enumerate(pack["keys"], 1):
+        _require_text(item, "table", file, "key", i)
+        cols = item.get("columns")
+        if not isinstance(cols, list) or not cols or any(not isinstance(x, str) or not x.strip() for x in cols):
+            raise Xl2aiError("E_RULE", f"{file}: [[key]] #{i} columns must be a non-empty list of strings")
+        if len(cols) != len(set(cols)):
+            raise Xl2aiError("E_RULE", f"{file}: [[key]] #{i} contains duplicate columns")
+
+    for i, item in enumerate(pack["relations"], 1):
+        for key in ("from_table", "from_column", "to_table", "to_column"):
+            _require_text(item, key, file, "relation", i)
+
+    return pack
 
 
 def load_pack(path):
@@ -34,14 +126,32 @@ def load_pack(path):
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise Xl2aiError("E_RULE", f"cannot load pack {file}: {e}") from None
     meta = raw.get("pack", {})
+    if not isinstance(meta, dict):
+        raise Xl2aiError("E_RULE", f"{file}: [pack] must be a table")
+    unknown = sorted(set(meta) - PACK_FIELDS)
+    if unknown:
+        raise Xl2aiError("E_RULE", f"{file}: [pack] has unknown field(s): {', '.join(unknown)}")
     name = str(meta.get("name", "")).strip()
     version = str(meta.get("version", "")).strip()
     if not name or not version:
         raise Xl2aiError("E_RULE", f"{file}: [pack] needs non-empty name and version")
-    return {"file": file, "name": name, "version": version,
-            "rules": list(raw.get("rule", [])), "kpis": list(raw.get("kpi", [])),
-            "terms": list(raw.get("term", [])), "keys": list(raw.get("key", [])),
-            "relations": list(raw.get("relation", []))}
+    pack = {"file": file, "name": name, "version": version,
+            "rules": _array_of_tables(raw, "rule", file),
+            "kpis": _array_of_tables(raw, "kpi", file),
+            "terms": _array_of_tables(raw, "term", file),
+            "keys": _array_of_tables(raw, "key", file),
+            "relations": _array_of_tables(raw, "relation", file)}
+    return _validate_pack(pack)
+
+
+def load_packs(paths):
+    packs = [load_pack(p) for p in paths]
+    names = [p["name"] for p in packs]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise Xl2aiError("E_RULE", "duplicate pack name(s): " + ", ".join(dupes),
+                         "pack names share result namespaces and must be unique")
+    return packs
 
 
 def _maps(catalog, run_dir):
@@ -160,7 +270,7 @@ def run_packs(cfg, run_id, catalog_path=None):
         writer.execute("DELETE FROM _kpi_results")
         writer.execute("DELETE FROM _dictionary WHERE origin='pack'")
         dbs, tables = _maps(writer, run_dir)
-        packs = [load_pack(p) for p in cfg.pack_paths()]
+        packs = load_packs(cfg.pack_paths())
         for pack in packs:
             _apply_confirmations(writer, tables, pack)
             for item in pack["terms"]:

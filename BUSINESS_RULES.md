@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Project knowledge is stored in TOML packs referenced by `[rules].packs` in `xl2ai.toml`.
+Project knowledge is stored in strictly validated TOML packs referenced by `[rules].packs` in `xl2ai.toml`. `xl2ai doctor` validates pack syntax and duplicate identifiers before a refresh opens Excel.
 
 Example:
 

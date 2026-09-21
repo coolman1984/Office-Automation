@@ -22,6 +22,7 @@ class TestInitDoctor(unittest.TestCase):
             self.assertTrue(os.path.isfile(pack))
             checks=run_doctor(cfg)
             self.assertTrue(any(c["name"]=="sources" and c["status"] for c in checks))
+            self.assertTrue(any(c["name"]=="rule_packs" and c["status"] for c in checks))
 
 
 if __name__=="__main__":

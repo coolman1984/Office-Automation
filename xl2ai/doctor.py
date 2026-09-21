@@ -37,6 +37,12 @@ def run_doctor(cfg):
     except Xl2aiError as e:
         checks.append(_check("sources",False,e.message,"error"))
     try:
+        from .rules import load_packs
+        packs=load_packs(cfg.pack_paths())
+        checks.append(_check("rule_packs",True,f"{len(packs)} pack(s) valid"))
+    except Xl2aiError as e:
+        checks.append(_check("rule_packs",False,e.message,"error"))
+    try:
         os.makedirs(cfg.data_dir,exist_ok=True)
         fd,p=tempfile.mkstemp(prefix=".xl2ai-write-",dir=cfg.data_dir)
         os.close(fd); os.remove(p)

@@ -7,8 +7,9 @@ import unittest
 from xl2ai.catalog import DDL
 from xl2ai.changes import detect_changes
 from xl2ai.core.config import load_config
+from xl2ai.core.errors import Xl2aiError
 from xl2ai.core.runs import Run
-from xl2ai.rules import run_packs
+from xl2ai.rules import load_pack, load_packs, run_packs
 
 
 class TestRules(unittest.TestCase):
@@ -65,6 +66,47 @@ to_column="customer_id"
         self.cat=cat
 
     def tearDown(self): self.tmp.cleanup()
+
+    def test_pack_validation_rejects_duplicate_ids_and_bad_severity(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=os.path.join(d,"bad.toml")
+            with open(p,"w",encoding="utf-8") as f:
+                f.write("""[pack]
+name="bad"
+version="1"
+[[rule]]
+id="x"
+sql="SELECT 1"
+severity="warn"
+[[rule]]
+id="x"
+sql="SELECT 1"
+severity="warn"
+""")
+            with self.assertRaises(Xl2aiError):
+                load_pack(p)
+            with open(p,"w",encoding="utf-8") as f:
+                f.write("""[pack]
+name="bad"
+version="1"
+[[rule]]
+id="x"
+sql="SELECT 1"
+severity="fatal"
+""")
+            with self.assertRaises(Xl2aiError):
+                load_pack(p)
+
+    def test_duplicate_pack_names_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths=[]
+            for n in ("a","b"):
+                p=os.path.join(d,n+".toml")
+                with open(p,"w",encoding="utf-8") as f:
+                    f.write('[pack]\nname="same"\nversion="1"\n')
+                paths.append(p)
+            with self.assertRaises(Xl2aiError):
+                load_packs(paths)
 
     def test_rule_and_kpi(self):
         run_packs(self.cfg,self.run.id,self.cat)
