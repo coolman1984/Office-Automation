@@ -42,3 +42,4 @@ jobs:
           tests.test_report
           tests.test_status
           tests.test_platform_e2e
+          tests.test_audit

@@ -17,6 +17,7 @@ from .core.errors import Xl2aiError
 from .core.fsutil import atomic_write_json
 from .core.log import log
 from .core.runs import CONTRACT_VERSION, Lock, Run, current_run_id, load_manifest, now_iso, reap_orphans
+from .core.sqliteutil import ro_connection
 from .sources.inventory import build_inventory
 
 
@@ -99,6 +100,17 @@ def materialize_reuse(src, dst):
         return "copy"
 
 
+def stage_audit(run, st, cfg, ctx):
+    from .audit import audit_run
+    result=audit_run(cfg,run.id,deep=False,catalog_path=ctx.get("catalog"))
+    st.detail("checks",result["checks"])
+    st.detail("issues",len(result["issues"]))
+    if not result["ok"]:
+        first=result["issues"][0]
+        st.fail("E_AUDIT",f"{len(result['issues'])} integrity issue(s); first: {first['code']}",
+                "run 'xl2ai audit --run <run_id> --deep' for a full check")
+
+
 def stage_report(run, st, cfg, ctx):
     from .report import write_report
     path, _ = write_report(cfg, run.id)
@@ -161,7 +173,8 @@ def stage_catalog(run, st, cfg, ctx):
     from .catalog import build_catalog
     path = build_catalog(cfg, run.id, run.m)
     st.artifact(path)
-    st.detail("tables", sqlite3.connect(path).execute("SELECT COUNT(*) FROM _tables").fetchone()[0])
+    with ro_connection(path) as con:
+        st.detail("tables", con.execute("SELECT COUNT(*) FROM _tables").fetchone()[0])
     ctx["catalog"] = path
 
 
@@ -218,7 +231,8 @@ def stage_extract(run, st, cfg, ctx):
 
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
           ("analyze", stage_analyze), ("relations", stage_relations), ("rules", stage_rules),
-          ("changes", stage_changes), ("contextpack", stage_contextpack), ("report", stage_report))
+          ("changes", stage_changes), ("audit", stage_audit),
+          ("contextpack", stage_contextpack), ("report", stage_report))
 
 
 def run_refresh(cfg, force=False):
