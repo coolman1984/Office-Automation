@@ -10,6 +10,8 @@ import sys
 
 # command -> (module, function, one-line description)
 STAGES = {
+    "init": ("xl2ai.init_project", "main", "create a reusable project config and optional rule-pack skeleton"),
+    "doctor": ("xl2ai.doctor", "main", "check environment, sources, storage and current dataset"),
     "refresh": ("xl2ai.refresh", "main", "run every stage into a new run; promote it only if valid"),
     "status": ("xl2ai.status", "main", "show the current dataset, its freshness and the last attempt"),
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),

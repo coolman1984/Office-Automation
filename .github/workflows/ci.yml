@@ -1,0 +1,36 @@
+name: core-ci
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+
+jobs:
+  non_excel:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile platform
+        run: python -m compileall -q xl2ai
+      - name: Run non-Excel regression suite
+        run: >
+          python -m unittest -v
+          tests.test_core_config
+          tests.test_core_runs
+          tests.test_sources_inventory
+          tests.test_structure
+          tests.test_incremental_refresh
+          tests.test_catalog
+          tests.test_analysis_relations
+          tests.test_rules_changes
+          tests.test_context_query

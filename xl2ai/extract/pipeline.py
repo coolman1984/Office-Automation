@@ -13,7 +13,7 @@ from ..core.procs import kill_pid
 from ..sources.detect import sniff_file
 from ..sources.inventory import expand_paths
 from .com import ExcelDied, ExcelSession, com_msg
-from .common import SCHEMA_VERSION, VISIBILITY, log, pywintypes
+from .common import PYWIN32_AVAILABLE, SCHEMA_VERSION, VISIBILITY, log, pywintypes
 from .names import sanitize_table
 from .sheet import SheetResult, extract_sheet
 from .store import open_db, resolve_db_path, write_log
@@ -161,6 +161,9 @@ def collect_files(paths):
 
 
 def main(argv=None):
+    if os.name != "nt" or not PYWIN32_AVAILABLE:
+        log("ERROR", "Excel extraction requires Windows, Microsoft Excel and pywin32. Metadata/query commands can still run.")
+        return 1
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
