@@ -61,17 +61,22 @@ def _envelope(tool, columns, rows, started, cfg, evidence=None, total_rows=None,
     return out
 
 
-def _cap_rows(cur, cfg):
-    rows=[]
-    columns=[d[0] for d in cur.description or []]
+def _cap_values(rows, cfg):
+    kept=[]
     truncated=False
-    for row in cur:
-        candidate=rows+[list(row)]
+    for row in rows:
+        candidate=kept+[list(row)]
         size=len(json.dumps(candidate,ensure_ascii=False,default=str).encode())
         if len(candidate)>cfg.ai["query_rows"] or size>cfg.ai["query_bytes"]:
             truncated=True
             break
-        rows=candidate
+        kept=candidate
+    return kept,truncated
+
+
+def _cap_rows(cur, cfg):
+    columns=[d[0] for d in cur.description or []]
+    rows,truncated=_cap_values(cur,cfg)
     return columns,rows,truncated
 
 
@@ -85,8 +90,10 @@ def schema(cfg, run_id=None):
             cols=[r[0] for r in cat.execute("SELECT name FROM _columns WHERE table_id=? ORDER BY position",(tid,))]
             rows.append([tid,sid,sheet,table,nrows,cols])
         rels=cat.execute("SELECT COUNT(*) FROM _relationships").fetchone()[0]
+    rows,truncated=_cap_values(rows,cfg)
     return _envelope("schema",["table_id","source_id","sheet","table","rows","columns"],rows,started,cfg,
-                     evidence=[{"run_id":rid}],hint=f"{rels} inferred relationship(s); use describe for one table")
+                     evidence=[{"run_id":rid}],truncated=truncated,
+                     hint=f"{rels} relationship(s); use describe for one table")
 
 
 def describe(cfg, selector, run_id=None):
@@ -102,9 +109,10 @@ def describe(cfg, selector, run_id=None):
         findings=cat.execute("SELECT code,severity,message FROM _dq_findings WHERE table_id=? ORDER BY severity,code",(tid,)).fetchall()
         keys=cat.execute("SELECT columns_json,uniqueness,status FROM _keys WHERE table_id=? ORDER BY uniqueness DESC",(tid,)).fetchall()
     outrows=[list(r[:-2])+[json.loads(r[-2] or "[]"),json.loads(r[-1] or "[]")] for r in rows]
+    outrows,truncated=_cap_values(outrows,cfg)
     return _envelope("describe",
         ["position","name","original_header","sql_type","kind","n","nulls","distinct","min","max","mean","top_k","sample"],
-        outrows,started,cfg,evidence=[{"run_id":rid,"table_id":tid}],
+        outrows,started,cfg,evidence=[{"run_id":rid,"table_id":tid}],truncated=truncated,
         hint=f"findings={findings}; keys={keys}")
 
 
@@ -113,7 +121,7 @@ def sample(cfg, selector, limit=None, run_id=None):
     rid,run_dir,catp=_run_paths(cfg,run_id)
     with _catalog(catp) as cat:
         tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
-    lim=min(int(limit or cfg.ai["query_rows"]),cfg.ai["query_rows"])
+    lim=max(1,min(int(limit or cfg.ai["query_rows"]),cfg.ai["query_rows"]))
     with _source_db(run_dir,db_rel) as src:
         cur=src.execute(f"SELECT * FROM {q(table)} LIMIT ?",(lim+1,))
         columns,rows,truncated=_cap_rows(cur,cfg)
@@ -207,6 +215,7 @@ def _print(obj):
 def main(argv=None):
     ap=argparse.ArgumentParser(prog="xl2ai query",description="Read-only capped query tools.")
     ap.add_argument("--config")
+    ap.add_argument("--run",help="inspect a specific run id instead of the current trusted run")
     sub=ap.add_subparsers(dest="cmd",required=True)
     sub.add_parser("schema")
     d=sub.add_parser("describe")
@@ -231,19 +240,19 @@ def main(argv=None):
     try:
         cfg=load_config(args.config)
         if args.cmd=="schema":
-            out=schema(cfg)
+            out=schema(cfg,args.run)
         elif args.cmd=="describe":
-            out=describe(cfg,args.table)
+            out=describe(cfg,args.table,args.run)
         elif args.cmd=="sample":
-            out=sample(cfg,args.table,args.limit)
+            out=sample(cfg,args.table,args.limit,args.run)
         elif args.cmd=="aggregate":
-            out=aggregate(cfg,args.table,args.column,args.op,args.group_by)
+            out=aggregate(cfg,args.table,args.column,args.op,args.group_by,args.run)
         elif args.cmd=="compare":
-            out=compare(cfg,args.kind)
+            out=compare(cfg,args.kind,args.run)
         elif args.cmd=="trace":
-            out=trace(cfg,args.table,args.xl_row)
+            out=trace(cfg,args.table,args.xl_row,args.run)
         else:
-            out=sql(cfg,args.source_id,args.statement)
+            out=sql(cfg,args.source_id,args.statement,args.run)
     except Xl2aiError as e:
         _print({"ok":False,"error":e.as_dict()})
         return 1

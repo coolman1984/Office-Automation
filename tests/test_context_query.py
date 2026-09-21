@@ -9,7 +9,7 @@ from xl2ai.contextpack import build_context_pack
 from xl2ai.core.config import load_config
 from xl2ai.core.errors import Xl2aiError
 from xl2ai.core.runs import Run
-from xl2ai.query import compare, sample, sql, trace
+from xl2ai.query import compare, describe, sample, schema, sql, trace
 
 
 class TestContextAndQuery(unittest.TestCase):
@@ -58,6 +58,15 @@ class TestContextAndQuery(unittest.TestCase):
         self.assertEqual(b1,b2)
         self.assertLessEqual(p2["est_tokens"],self.cfg.ai["context_tokens"])
         self.assertEqual(p2["definitions"][0]["term"],"value")
+
+    def test_schema_and_describe_obey_query_caps(self):
+        self.cfg.ai["query_rows"]=1
+        sch=schema(self.cfg,run_id=self.run.id)
+        self.assertEqual(sch["row_count"],1)
+        self.assertTrue(sch["truncated"])
+        desc=describe(self.cfg,"t1",run_id=self.run.id)
+        self.assertEqual(desc["row_count"],1)
+        self.assertTrue(desc["truncated"])
 
     def test_sample_is_capped_and_trace_has_evidence(self):
         out=sample(self.cfg,"t1",limit=10,run_id=self.run.id)
