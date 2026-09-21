@@ -14,6 +14,7 @@ STAGES = {
     "status": ("xl2ai.status", "main", "show the current dataset, its freshness and the last attempt"),
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),
     "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite via Excel COM, verified against Excel (stand-alone)"),
+    "catalog": ("xl2ai.catalog", "main", "build stable source/table/column identities for a run"),
 }
 
 

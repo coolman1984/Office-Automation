@@ -19,10 +19,16 @@ DEFAULTS = {
     "refresh": {"allow_partial": False, "keep_runs": 3, "lock_stale_hours": 12},
     "extract": {"verify": True, "strict": False, "block_cells": 500_000, "cache_cells": 12_000_000,
                 "open_timeout": 180, "visible": False, "sheets": []},
+    "analysis": {"sample_values": 5, "top_k": 5, "relation_sample": 1000, "row_hash_max_rows": 200_000},
+    "rules": {"packs": []},
+    "ai": {"context_tokens": 4000, "query_rows": 50, "query_bytes": 8192, "query_timeout": 5},
 }
 SOURCE_KEYS = {"path": str, "alias": str}
 MINIMUMS = {("refresh", "keep_runs"): 1, ("refresh", "lock_stale_hours"): 0, ("extract", "block_cells"): 1000,
-            ("extract", "cache_cells"): 0, ("extract", "open_timeout"): 5}
+            ("extract", "cache_cells"): 0, ("extract", "open_timeout"): 5,
+            ("analysis", "sample_values"): 1, ("analysis", "top_k"): 1, ("analysis", "relation_sample"): 10,
+            ("analysis", "row_hash_max_rows"): 0, ("ai", "context_tokens"): 500, ("ai", "query_rows"): 1,
+            ("ai", "query_bytes"): 256, ("ai", "query_timeout"): 1}
 
 
 def _err(msg, hint=""):
@@ -86,6 +92,9 @@ class Config:
         self.keep_runs = cfg["refresh"]["keep_runs"]
         self.lock_stale_hours = cfg["refresh"]["lock_stale_hours"]
         self.extract = cfg["extract"]
+        self.analysis = cfg["analysis"]
+        self.rule_packs = tuple(cfg["rules"]["packs"])
+        self.ai = cfg["ai"]
 
     runs_dir = property(lambda self: os.path.join(self.data_dir, "runs"))
     current_file = property(lambda self: os.path.join(self.data_dir, "current.json"))
@@ -94,6 +103,9 @@ class Config:
     def with_sources(self, paths):
         """CLI override: replace the configured sources."""
         return Config(self.raw, [SourceSpec(p) for p in paths], self.root, self.path)
+
+    def pack_paths(self):
+        return tuple(self.resolve(p) for p in self.rule_packs)
 
     def extract_options(self):
         e = self.extract

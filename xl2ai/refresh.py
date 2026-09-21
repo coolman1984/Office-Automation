@@ -99,6 +99,14 @@ def materialize_reuse(src, dst):
         return "copy"
 
 
+def stage_catalog(run, st, cfg, ctx):
+    from .catalog import build_catalog
+    path = build_catalog(cfg, run.id, run.m)
+    st.artifact(path)
+    st.detail("tables", sqlite3.connect(path).execute("SELECT COUNT(*) FROM _tables").fetchone()[0])
+    ctx["catalog"] = path
+
+
 def stage_extract(run, st, cfg, ctx):
     opts = cfg.extract_options()
     per, codes = [], set()
@@ -150,7 +158,7 @@ def stage_extract(run, st, cfg, ctx):
         st.partial("some sheets failed to extract; the run is not promoted unless allow_partial is set")
 
 
-STAGES = (("sources", stage_sources), ("extract", stage_extract))
+STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog))
 
 
 def run_refresh(cfg, force=False):
