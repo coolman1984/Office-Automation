@@ -246,27 +246,29 @@ class TestHardKillGate(unittest.TestCase):
 
     def test_killed_run_never_promotes_and_is_reaped(self):
         helper = os.path.join(ROOT, "tests", "helpers", "slow_run.py")
+        before = set(runsmod.list_runs(self.cfg))
         proc = subprocess.Popen([sys.executable, "-u", helper, self.cfg.path, "60"], cwd=ROOT,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        run_id = None
+        manifest_path = None
         try:
-            run_id = None
-            for _ in range(200):                            # other log lines (e.g. a low-memory warning) may precede it
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                if line.startswith("RUN_ID="):
-                    run_id = line.strip().split("=", 1)[1]
-                    break
-            self.assertTrue(run_id, f"no RUN_ID line from the helper; stderr:\n{proc.stderr.read()}")
-            manifest_path = os.path.join(self.cfg.runs_dir, run_id, "manifest.json")
-            for _ in range(50):                             # wait for the stage to actually be recorded as running
-                if os.path.exists(manifest_path) and read_json(manifest_path)["stages"]:
-                    break
-                time.sleep(0.1)
-            self.assertEqual(read_json(manifest_path)["stages"][0]["status"], "running")
+            for _ in range(100):
+                created = [r for r in runsmod.list_runs(self.cfg) if r not in before]
+                if created:
+                    candidate = created[0]
+                    p = os.path.join(self.cfg.runs_dir, candidate, "manifest.json")
+                    try:
+                        m = read_json(p)
+                    except (OSError, ValueError):
+                        m = {}
+                    if m.get("stages") and m["stages"][0].get("status") == "running":
+                        run_id, manifest_path = candidate, p
+                        break
+                time.sleep(0.05)
+            self.assertTrue(run_id, "helper never reached a durably recorded running stage")
             self.assertTrue(os.path.exists(self.cfg.lock_file), "the lock should still be held at kill time")
         finally:
-            proc.kill()                                     # TerminateProcess: no cleanup code in the child runs
+            proc.kill()                                     # hard stop: child cleanup code must not run
             proc.wait(timeout=10)
 
         self.assertIsNone(runsmod.current_run_id(self.cfg), "a killed run must never become current")

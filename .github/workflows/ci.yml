@@ -34,3 +34,4 @@ jobs:
           tests.test_analysis_relations
           tests.test_rules_changes
           tests.test_context_query
+          tests.test_init_doctor
