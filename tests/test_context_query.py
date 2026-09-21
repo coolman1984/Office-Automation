@@ -9,7 +9,7 @@ from xl2ai.contextpack import build_context_pack
 from xl2ai.core.config import load_config
 from xl2ai.core.errors import Xl2aiError
 from xl2ai.core.runs import Run
-from xl2ai.query import compare, describe, sample, schema, sql, trace
+from xl2ai.query import compare, describe, meta, sample, schema, sql, trace
 
 
 class TestContextAndQuery(unittest.TestCase):
@@ -39,7 +39,12 @@ class TestContextAndQuery(unittest.TestCase):
         c.executemany("INSERT INTO _profile_columns VALUES (?,?,?,?,?,?,?,?,?)",[
             ("t1.c1",3,0,3,"1","3",2.0,'[[1,1],[2,1]]','[1,2]'),
             ("t1.c2",3,0,3,"a","c",None,'[["a",1],["b",1]]','["a","b"]')])
-        c.execute("INSERT INTO _dictionary VALUES (?,?,?,?,?,?,?,?,?)",("value","demo meaning",'[]',"","t1.c2","confirmed","pack","p","1"))
+        c.execute("INSERT INTO _dictionary VALUES (?,?,?,?,?,?,?,?,?)",
+                  ("value","شرح عربي مفصل للمصطلح",'["قيمة"]',"","t1.c2","confirmed","pack","p","1"))
+        c.execute("INSERT INTO _relationships VALUES (?,?,?,?,?,?,?,?,?)",
+                  ("r1","t1.c2","t1.c1","reference",None,"confirmed","pack",1.0,'{"pack":"p"}'))
+        c.execute("INSERT INTO _dq_findings VALUES (?,?,?,?,?,?,?,?)",
+                  ("d1","DQ_TEST","warn","t1","t1.c2",1,'["x"]',"demo warning"))
         c.execute("INSERT INTO _changes VALUES (?,?,?,?,?,?,?)",("c1","volume","info","s/Sheet1","2","3","{}"))
         c.commit()
         c.close()
@@ -58,6 +63,8 @@ class TestContextAndQuery(unittest.TestCase):
         self.assertEqual(b1,b2)
         self.assertLessEqual(p2["est_tokens"],self.cfg.ai["context_tokens"])
         self.assertEqual(p2["definitions"][0]["term"],"value")
+        self.assertEqual(p2["relationships"][0]["status"],"confirmed")
+        self.assertIsNone(p2["relationships"][0]["containment"])
 
     def test_schema_and_describe_obey_query_caps(self):
         self.cfg.ai["query_rows"]=1
@@ -75,6 +82,15 @@ class TestContextAndQuery(unittest.TestCase):
         tr=trace(self.cfg,"t1",3,run_id=self.run.id)
         self.assertEqual(tr["rows"][0][1],2)
         self.assertEqual(tr["evidence"][0]["xl_row"],3)
+
+    def test_meta_exposes_catalog_sections(self):
+        out=meta(self.cfg,"quality",run_id=self.run.id)
+        self.assertEqual(out["row_count"],1)
+        self.assertEqual(out["rows"][0][0],"DQ_TEST")
+        rel=meta(self.cfg,"relationships",run_id=self.run.id)
+        self.assertEqual(rel["rows"][0][0],"confirmed")
+        defs=meta(self.cfg,"definitions",run_id=self.run.id)
+        self.assertEqual(defs["rows"][0][2],["قيمة"])
 
     def test_compare_reads_capped_deterministic_changes(self):
         out=compare(self.cfg,"volume",run_id=self.run.id)

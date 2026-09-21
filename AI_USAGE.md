@@ -30,6 +30,9 @@ Use it to inspect column names/types, nulls, distinct counts, ranges, top values
 xl2ai query sample <table-id>
 xl2ai query aggregate <table-id> amount --op sum --group-by department
 xl2ai query compare --kind row
+xl2ai query meta relationships
+xl2ai query meta quality
+xl2ai query meta definitions
 xl2ai query trace <table-id> 25
 ```
 

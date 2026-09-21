@@ -106,14 +106,14 @@ def describe(cfg, selector, run_id=None):
                                   p.n,p.nulls,p.distinct_count,p.min_value,p.max_value,p.mean,p.top_k,p.sample
                            FROM _columns c LEFT JOIN _profile_columns p ON p.column_id=c.column_id
                            WHERE c.table_id=? ORDER BY c.position""",(tid,)).fetchall()
-        findings=cat.execute("SELECT code,severity,message FROM _dq_findings WHERE table_id=? ORDER BY severity,code",(tid,)).fetchall()
-        keys=cat.execute("SELECT columns_json,uniqueness,status FROM _keys WHERE table_id=? ORDER BY uniqueness DESC",(tid,)).fetchall()
+        findings=cat.execute("SELECT COUNT(*) FROM _dq_findings WHERE table_id=?",(tid,)).fetchone()[0]
+        keys=cat.execute("SELECT COUNT(*) FROM _keys WHERE table_id=?",(tid,)).fetchone()[0]
     outrows=[list(r[:-2])+[json.loads(r[-2] or "[]"),json.loads(r[-1] or "[]")] for r in rows]
     outrows,truncated=_cap_values(outrows,cfg)
     return _envelope("describe",
         ["position","name","original_header","sql_type","kind","n","nulls","distinct","min","max","mean","top_k","sample"],
         outrows,started,cfg,evidence=[{"run_id":rid,"table_id":tid}],truncated=truncated,
-        hint=f"findings={findings}; keys={keys}")
+        hint=f"quality_findings={findings}; candidate_or_confirmed_keys={keys}; use query meta quality/keys for details")
 
 
 def sample(cfg, selector, limit=None, run_id=None):
@@ -151,6 +151,69 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
         columns,rows,truncated=_cap_rows(cur,cfg)
     return _envelope("aggregate",columns,rows,started,cfg,evidence=[{"run_id":rid,"source_id":sid,"table_id":tid}],
                      truncated=truncated)
+
+
+META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys"}
+
+
+def meta(cfg, section, run_id=None):
+    """Return bounded catalog metadata that may be omitted from the context pack."""
+    started=time.perf_counter()
+    rid,run_dir,catp=_run_paths(cfg,run_id)
+    section=str(section).lower()
+    if section not in META_SECTIONS:
+        raise Xl2aiError("E_STAGE_INPUT",f"unknown metadata section: {section}",
+                         "use one of: " + ", ".join(sorted(META_SECTIONS)))
+    with _catalog(catp) as cat:
+        if section=="relationships":
+            cur=cat.execute("""SELECT r.status,r.kind,ft.source_id,ft.table_name,fc.name,
+                                      tt.source_id,tt.table_name,tc.name,r.containment,r.method,r.score
+                               FROM _relationships r
+                               JOIN _columns fc ON fc.column_id=r.from_column
+                               JOIN _tables ft ON ft.table_id=fc.table_id
+                               JOIN _columns tc ON tc.column_id=r.to_column
+                               JOIN _tables tt ON tt.table_id=tc.table_id
+                               ORDER BY r.status DESC,r.score DESC,r.id""")
+        elif section=="definitions":
+            cur=cat.execute("""SELECT term,meaning,aliases,unit,applies_to,status,origin,pack,pack_version
+                               FROM _dictionary ORDER BY term,pack""")
+        elif section=="kpis":
+            cur=cat.execute("""SELECT kpi_id,pack,pack_version,value,unit,dims,definition_ref
+                               FROM _kpi_results ORDER BY pack,kpi_id""")
+        elif section=="rules":
+            cur=cat.execute("""SELECT rule_id,pack,pack_version,status,expected,actual,severity,message
+                               FROM _rule_results ORDER BY pack,rule_id""")
+        elif section=="quality":
+            cur=cat.execute("""SELECT code,severity,table_id,column_id,count,examples,message
+                               FROM _dq_findings
+                               ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,code,id""")
+        else:
+            cur=cat.execute("""SELECT table_id,columns_json,uniqueness,null_rate,status,method,score
+                               FROM _keys ORDER BY status DESC,score DESC,id""")
+        columns,rows,truncated=_cap_rows(cur,cfg)
+
+    json_cols={
+        "definitions":{"aliases"},
+        "kpis":{"dims"},
+        "quality":{"examples"},
+        "keys":{"columns_json"},
+    }.get(section,set())
+    if json_cols:
+        indexes={name:i for i,name in enumerate(columns)}
+        decoded=[]
+        for row in rows:
+            row=list(row)
+            for name in json_cols:
+                i=indexes[name]
+                try:
+                    row[i]=json.loads(row[i] or ("{}" if name=="dims" else "[]"))
+                except (json.JSONDecodeError,TypeError):
+                    pass
+            decoded.append(row)
+        rows=decoded
+    return _envelope("meta",columns,rows,started,cfg,
+                     evidence=[{"run_id":rid,"section":section}],
+                     truncated=truncated,hint=f"catalog metadata section: {section}")
 
 
 def compare(cfg, kind=None, run_id=None):
@@ -228,6 +291,8 @@ def main(argv=None):
     a.add_argument("column")
     a.add_argument("--op",default="count")
     a.add_argument("--group-by")
+    m=sub.add_parser("meta")
+    m.add_argument("section",choices=sorted(META_SECTIONS))
     c=sub.add_parser("compare")
     c.add_argument("--kind")
     t=sub.add_parser("trace")
@@ -247,6 +312,8 @@ def main(argv=None):
             out=sample(cfg,args.table,args.limit,args.run)
         elif args.cmd=="aggregate":
             out=aggregate(cfg,args.table,args.column,args.op,args.group_by,args.run)
+        elif args.cmd=="meta":
+            out=meta(cfg,args.section,args.run)
         elif args.cmd=="compare":
             out=compare(cfg,args.kind,args.run)
         elif args.cmd=="trace":

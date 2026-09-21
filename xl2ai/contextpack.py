@@ -20,12 +20,20 @@ def _compact_json(obj):
 
 
 def _est_tokens(obj):
-    return int(math.ceil(len(_compact_json(obj)) / 3.5))
+    """Conservative model-agnostic token estimate.
+
+    ASCII text is usually several characters per token. Arabic, CJK and emoji can be much denser, so every
+    non-ASCII code point is counted as one token to avoid silently overflowing multilingual context budgets.
+    """
+    text = _compact_json(obj)
+    ascii_chars = sum(ord(ch) < 128 for ch in text)
+    non_ascii = len(text) - ascii_chars
+    return int(math.ceil(ascii_chars / 3.5 + non_ascii))
 
 
-def _add_budgeted(payload, section, item, budget_chars, omitted, label):
+def _add_budgeted(payload, section, item, budget_tokens, omitted, label):
     payload.setdefault(section, []).append(item)
-    if len(_compact_json(payload)) > budget_chars:
+    if _est_tokens(payload) > budget_tokens:
         payload[section].pop()
         omitted[label] = omitted.get(label, 0) + 1
         return False
@@ -46,7 +54,9 @@ def _render_markdown(p):
     if p.get("relationships"):
         lines += ["", "## Relationships"]
         for r in p["relationships"]:
-            lines.append(f"- {r['from']} -> {r['to']} | containment {r['containment']:.3f} | score {r['score']:.3f}")
+            containment = "n/a" if r.get("containment") is None else f"{r['containment']:.3f}"
+            score = "n/a" if r.get("score") is None else f"{r['score']:.3f}"
+            lines.append(f"- {r['from']} -> {r['to']} | {r.get('status','')} | containment {containment} | score {score}")
     if p.get("definitions"):
         lines += ["", "## Definitions"]
         for d in p["definitions"]:
@@ -81,7 +91,7 @@ def build_context_pack(cfg, run_id, catalog_path=None):
         raise Xl2aiError("E_STAGE_INPUT", "catalog not found")
     con = sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
     try:
-        budget_chars = int(cfg.ai["context_tokens"] * 3.2)
+        budget_tokens = int(cfg.ai["context_tokens"])
         payload = {"contract_version": "1.0", "run_id": run_id, "sources": [], "tables": [],
                    "relationships": [], "definitions": [], "kpis": [], "rules": [], "changes": [],
                    "quality": [], "warnings": [], "omitted": []}
@@ -93,7 +103,7 @@ def build_context_pack(cfg, run_id, catalog_path=None):
         for sid, size, mtime, hash_mode, reused, table_count in source_rows:
             _add_budgeted(payload, "sources",
                           {"source_id": sid, "kind": hash_mode, "size": int(size or 0), "mtime": mtime,
-                           "reused": bool(reused), "tables": int(table_count)}, budget_chars, omitted, "sources")
+                           "reused": bool(reused), "tables": int(table_count)}, budget_tokens, omitted, "sources")
 
         table_rows = con.execute("""SELECT table_id,source_id,sheet_name,row_count,column_count
                                     FROM _tables ORDER BY table_id""").fetchall()
@@ -106,10 +116,10 @@ def build_context_pack(cfg, run_id, catalog_path=None):
             item = {"h": h, "table_id": tid, "source_id": sid, "sheet": sheet,
                     "rows": int(rows), "cols": int(ncols),
                     "columns": [{"h": f"{h}.c{p}", "name": n, "type": typ} for p,n,typ in cols]}
-            if not _add_budgeted(payload, "tables", item, budget_chars, omitted, "tables"):
+            if not _add_budgeted(payload, "tables", item, budget_tokens, omitted, "tables"):
                 skinny = dict(item)
                 skinny["columns"] = []
-                if _add_budgeted(payload, "tables", skinny, budget_chars, omitted, "tables_without_columns"):
+                if _add_budgeted(payload, "tables", skinny, budget_tokens, omitted, "tables_without_columns"):
                     omitted["columns"] = omitted.get("columns", 0) + len(cols)
 
         col_handles = {}
@@ -117,46 +127,50 @@ def build_context_pack(cfg, run_id, catalog_path=None):
             for cid, pos in con.execute("SELECT column_id,position FROM _columns WHERE table_id=?", (tid,)):
                 col_handles[cid] = f"{h}.c{pos}"
 
-        for f,t,containment,score in con.execute(
-            "SELECT from_column,to_column,containment,score FROM _relationships ORDER BY score DESC,id"):
+        for f,t,containment,status,method,score in con.execute(
+            """SELECT from_column,to_column,containment,status,method,score
+               FROM _relationships ORDER BY score DESC,id"""):
             _add_budgeted(payload, "relationships",
                           {"from": col_handles.get(f,f), "to": col_handles.get(t,t),
-                           "containment": round(float(containment),4), "score": round(float(score),4)},
-                          budget_chars, omitted, "relationships")
+                           "containment": None if containment is None else round(float(containment),4),
+                           "status": status, "method": method,
+                           "score": None if score is None else round(float(score),4)},
+                          budget_tokens, omitted, "relationships")
 
         for term,meaning,aliases,unit,applies,status in con.execute(
             "SELECT term,meaning,aliases,unit,applies_to,status FROM _dictionary ORDER BY term"):
             _add_budgeted(payload, "definitions",
                           {"term": term, "meaning": meaning, "aliases": json.loads(aliases or "[]"),
                            "unit": unit, "applies_to": applies, "status": status},
-                          budget_chars, omitted, "definitions")
+                          budget_tokens, omitted, "definitions")
 
         for kid,pack,value,unit,dims in con.execute(
             "SELECT kpi_id,pack,value,unit,dims FROM _kpi_results ORDER BY pack,kpi_id"):
             _add_budgeted(payload, "kpis",
                           {"id": kid, "pack": pack, "value": value, "unit": unit, "dims": json.loads(dims or "{}")},
-                          budget_chars, omitted, "kpis")
+                          budget_tokens, omitted, "kpis")
         for rid,pack,status,severity,message in con.execute(
             "SELECT rule_id,pack,status,severity,message FROM _rule_results ORDER BY pack,rule_id"):
             _add_budgeted(payload, "rules",
                           {"id": rid, "pack": pack, "status": status, "severity": severity, "message": message},
-                          budget_chars, omitted, "rules")
+                          budget_tokens, omitted, "rules")
         for kind,severity,subject in con.execute(
             "SELECT kind,severity,subject FROM _changes ORDER BY kind,subject"):
             _add_budgeted(payload, "changes",
                           {"kind": kind, "severity": severity, "subject": subject},
-                          budget_chars, omitted, "changes")
+                          budget_tokens, omitted, "changes")
         for code,severity,table_id,column_id,message in con.execute(
             """SELECT code,severity,table_id,column_id,message FROM _dq_findings
                WHERE severity IN ('warn','error') ORDER BY CASE severity WHEN 'error' THEN 0 ELSE 1 END,code,id"""):
             subject = col_handles.get(column_id) or handles.get(table_id) or column_id or table_id
             _add_budgeted(payload, "quality",
                           {"code": code, "severity": severity, "subject": subject, "message": message},
-                          budget_chars, omitted, "quality")
+                          budget_tokens, omitted, "quality")
 
         use = {"sources":"query schema","tables":"query schema","tables_without_columns":"query describe",
-               "columns":"query describe","relationships":"query schema","definitions":"query schema",
-               "kpis":"query schema","rules":"query schema","changes":"query schema","quality":"query describe"}
+               "columns":"query describe","relationships":"query meta relationships",
+               "definitions":"query meta definitions","kpis":"query meta kpis","rules":"query meta rules",
+               "changes":"query compare","quality":"query meta quality"}
         payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
                               for k,v in sorted(omitted.items()) if v]
         base = dict(payload)
