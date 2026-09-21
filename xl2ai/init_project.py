@@ -57,6 +57,9 @@ def create_project(output, name, sources, wrapper_prefixes=(), with_pack=False, 
                         '# Rules and KPIs use a stable source alias/table selector. Give important sources aliases in xl2ai.toml.\n'
                         '# [[rule]]\n# id = "example"\n# sql = "SELECT COUNT(*) FROM {{table:source-alias/table_name}} WHERE ..."\n'
                         '# expect = "zero"\n# severity = "error"\n\n'
+                        '# [[key]]\n# table = "source-alias/table_name"\n# columns = ["id"]\n\n'
+                        '# [[relation]]\n# from_table = "source-alias/orders"\n# from_column = "customer_id"\n'
+                        '# to_table = "source-alias/customers"\n# to_column = "customer_id"\n\n'
                         '# [[kpi]]\n# id = "example_kpi"\n# sql = "SELECT SUM(amount) FROM {{table:source-alias/table_name}}"\n# unit = "EGP"\n')
     return output,pack_path
 

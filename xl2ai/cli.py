@@ -23,6 +23,7 @@ STAGES = {
     "changes": ("xl2ai.changes", "main", "compare a run with the previous trusted run"),
     "pack": ("xl2ai.contextpack", "main", "build a compact deterministic context pack for AI"),
     "query": ("xl2ai.query", "main", "read-only capped schema/describe/sample/aggregate/trace/sql tools"),
+    "report": ("xl2ai.report", "main", "show one-screen health, rules, KPI and change summary"),
 }
 
 

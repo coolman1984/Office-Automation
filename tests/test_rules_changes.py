@@ -28,6 +28,14 @@ severity="error"
 id="total_amount"
 sql="SELECT SUM(amount) FROM {{table:source-a/orders}}"
 unit="EGP"
+[[key]]
+table="source-a/orders"
+columns=["amount"]
+[[relation]]
+from_table="source-a/orders"
+from_column="customer_id"
+to_table="source-a/customers"
+to_column="customer_id"
 """)
         cfgp=os.path.join(root,"xl2ai.toml")
         with open(cfgp,"w",encoding="utf-8") as f:
@@ -35,13 +43,24 @@ unit="EGP"
         self.cfg=load_config(cfgp)
         self.run=Run.create(self.cfg)
         db=self.run.path("extract","source-a.db"); os.makedirs(os.path.dirname(db),exist_ok=True)
-        c=sqlite3.connect(db); c.execute("CREATE TABLE orders (_xl_row INTEGER, amount REAL)")
-        c.executemany("INSERT INTO orders VALUES (?,?)",[(2,10.0),(3,20.0)]); c.commit(); c.close()
+        c=sqlite3.connect(db)
+        c.execute("CREATE TABLE orders (_xl_row INTEGER, amount REAL, customer_id INTEGER)")
+        c.execute("CREATE TABLE customers (_xl_row INTEGER, customer_id INTEGER)")
+        c.executemany("INSERT INTO orders VALUES (?,?,?)",[(2,10.0,1),(3,20.0,2)])
+        c.executemany("INSERT INTO customers VALUES (?,?)",[(2,1),(3,2)])
+        c.commit(); c.close()
         cat=self.run.path("catalog.db"); c=sqlite3.connect(cat); c.executescript(DDL)
         c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",
                   ("source-a","x","h",1,"t","full","extract/source-a.db",0,None))
         c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
-                  ("t1","source-a","Orders","orders","extract/source-a.db",2,1,1,"visible","fp"))
+                  ("t1","source-a","Orders","orders","extract/source-a.db",2,2,1,"visible","fp1"))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  ("t2","source-a","Customers","customers","extract/source-a.db",2,1,1,"visible","fp2"))
+        c.executemany("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",[
+            ("t1.c1","t1",1,"amount","Amount",1,"A","REAL","real",2,0),
+            ("t1.c2","t1",2,"customer_id","Customer ID",2,"B","INTEGER","integer",2,0),
+            ("t2.c1","t2",1,"customer_id","Customer ID",1,"A","INTEGER","integer",2,0),
+        ])
         c.commit(); c.close()
         self.cat=cat
 
@@ -52,9 +71,13 @@ unit="EGP"
         c=sqlite3.connect(self.cat)
         rule=c.execute("SELECT status FROM _rule_results WHERE rule_id='no_negative'").fetchone()[0]
         kpi=c.execute("SELECT value,unit FROM _kpi_results WHERE kpi_id='total_amount'").fetchone()
+        key_status=c.execute("SELECT status FROM _keys WHERE table_id='t1' AND method='pack'").fetchone()[0]
+        rel_status=c.execute("SELECT status FROM _relationships WHERE from_column='t1.c2' AND to_column='t2.c1'").fetchone()[0]
         c.close()
         self.assertEqual(rule,"pass")
         self.assertEqual(kpi,("30.0","EGP"))
+        self.assertEqual(key_status,"confirmed")
+        self.assertEqual(rel_status,"confirmed")
 
 
 class TestChanges(unittest.TestCase):

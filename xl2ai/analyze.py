@@ -96,16 +96,43 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
         con.execute("DELETE FROM _table_profiles")
         con.execute("DELETE FROM _dq_findings")
         con.execute("DELETE FROM _keys")
-        tables = con.execute("""SELECT table_id,table_name,db_rel,row_count FROM _tables ORDER BY table_id""").fetchall()
-        for table_id, table_name, db_rel, row_count in tables:
+        tables = con.execute("""SELECT table_id,table_name,db_rel,row_count,header_row,column_count
+                                FROM _tables ORDER BY table_id""").fetchall()
+        for table_id, table_name, db_rel, row_count, header_row, column_count in tables:
             src_path = os.path.join(run_dir, db_rel.replace("/", os.sep))
             with _ro(src_path) as src:
+                if header_row is None:
+                    _add_finding(con, "DQ_HEADER_UNDETECTED", "info", table_id, None, 1, [],
+                                 "no header row was detected; generated column names may need confirmation")
+                if int(column_count or 0) >= 500:
+                    _add_finding(con, "DQ_VERY_WIDE", "warn", table_id, None, int(column_count), [],
+                                 "very wide table; inspect whether several logical regions were flattened together")
+                log_cols = {r[1] for r in src.execute("PRAGMA table_info(_extraction_log)").fetchall()}
+                wanted = {"formula_cells", "pivot_tables", "merged_in_data"}
+                if wanted.issubset(log_cols):
+                    x = src.execute("""SELECT formula_cells,pivot_tables,merged_in_data
+                                       FROM _extraction_log WHERE table_name=? LIMIT 1""", (table_name,)).fetchone()
+                    if x:
+                        formulas, pivots, merged = x
+                        if int(formulas or 0):
+                            _add_finding(con, "DQ_FORMULAS_VALUE_ONLY", "warn", table_id, None, int(formulas), [],
+                                         "formula results were extracted as values; formula logic is not yet represented in the catalog")
+                        if int(pivots or 0):
+                            _add_finding(con, "DQ_PIVOT_OUTPUT_ONLY", "warn", table_id, None, int(pivots), [],
+                                         "pivot output was extracted; pivot definition/source logic is not yet represented")
+                        if int(merged or 0):
+                            _add_finding(con, "DQ_MERGED_IN_DATA", "warn", table_id, None, 1, [],
+                                         "merged cells exist inside the data region; only top-left cells carry values")
                 row_fp, row_mode = _row_fingerprint(src, table_name, int(row_count), cfg.analysis["row_hash_max_rows"])
                 con.execute("INSERT INTO _table_profiles VALUES (?,?,?,?)",
                             (table_id, int(row_count), row_fp, row_mode))
                 cols = con.execute("""SELECT column_id,name,sql_type,kind,non_null,error_cells,original_header
                                       FROM _columns WHERE table_id=? ORDER BY position""", (table_id,)).fetchall()
                 candidate_cols = []
+                generated_headers = sum(1 for c in cols if c[6] is None)
+                if cols and generated_headers / len(cols) >= 0.5:
+                    _add_finding(con, "DQ_HEADER_LOW_CONFIDENCE", "warn", table_id, None, generated_headers, [],
+                                 "at least half the column names were generated; confirm the table/header structure")
                 for column_id, name, sql_type, kind, non_null, error_cells, original_header in cols:
                     p = _column_profile(src, table_name, name, sql_type, kind, int(row_count),
                                         cfg.analysis["top_k"], cfg.analysis["sample_values"])

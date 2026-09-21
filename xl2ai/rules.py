@@ -5,6 +5,7 @@ Pack format is TOML (stdlib, offline-friendly). Project knowledge lives in packs
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -38,7 +39,8 @@ def load_pack(path):
         raise Xl2aiError("E_RULE", f"{file}: [pack] needs non-empty name and version")
     return {"file": file, "name": name, "version": version,
             "rules": list(raw.get("rule", [])), "kpis": list(raw.get("kpi", [])),
-            "terms": list(raw.get("term", []))}
+            "terms": list(raw.get("term", [])), "keys": list(raw.get("key", [])),
+            "relations": list(raw.get("relation", []))}
 
 
 def _maps(catalog, run_dir):
@@ -52,6 +54,48 @@ def _maps(catalog, run_dir):
             raise Xl2aiError("E_RULE", f"ambiguous table selector {key}", "use unique source aliases/table names")
         tables[key] = (dbs[db_rel], table_name, table_id)
     return dbs, tables
+
+
+def _table_ref(tables, selector):
+    selector = str(selector or "").strip()
+    if selector not in tables:
+        raise Xl2aiError("E_RULE", f"unknown table selector: {selector}")
+    return tables[selector]
+
+
+def _column_id(writer, table_id, name):
+    row = writer.execute("SELECT column_id FROM _columns WHERE table_id=? AND name=?", (table_id, str(name))).fetchone()
+    if not row:
+        raise Xl2aiError("E_RULE", f"column '{name}' not found in table {table_id}")
+    return row[0]
+
+
+def _apply_confirmations(writer, tables, pack):
+    for item in pack["keys"]:
+        _, _, table_id = _table_ref(tables, item.get("table"))
+        names = item.get("columns", [])
+        if not isinstance(names, list) or not names:
+            raise Xl2aiError("E_RULE", f"{pack['file']}: [[key]] needs a non-empty columns list")
+        column_ids = [_column_id(writer, table_id, n) for n in names]
+        kid = hashlib.sha1((table_id + "|" + "|".join(column_ids)).encode()).hexdigest()[:20]
+        old = writer.execute("SELECT uniqueness,null_rate FROM _keys WHERE id=?", (kid,)).fetchone()
+        uniqueness, null_rate = old if old else (None, None)
+        writer.execute("INSERT OR REPLACE INTO _keys VALUES (?,?,?,?,?,?,?,?)",
+                       (kid, table_id, json.dumps(column_ids, separators=(",", ":")), uniqueness, null_rate,
+                        "confirmed", "pack", 1.0))
+
+    for item in pack["relations"]:
+        _, _, from_table_id = _table_ref(tables, item.get("from_table"))
+        _, _, to_table_id = _table_ref(tables, item.get("to_table"))
+        from_id = _column_id(writer, from_table_id, item.get("from_column"))
+        to_id = _column_id(writer, to_table_id, item.get("to_column"))
+        rid = hashlib.sha1(f"{from_id}|{to_id}".encode()).hexdigest()[:20]
+        old = writer.execute("SELECT containment FROM _relationships WHERE id=?", (rid,)).fetchone()
+        containment = old[0] if old else None
+        evidence = json.dumps({"pack": pack["name"], "pack_version": pack["version"]}, separators=(",", ":"))
+        writer.execute("INSERT OR REPLACE INTO _relationships VALUES (?,?,?,?,?,?,?,?,?)",
+                       (rid, from_id, to_id, str(item.get("kind", "reference")), containment,
+                        "confirmed", "pack", 1.0, evidence))
 
 
 def _resolve_sql(sql, tables):
@@ -116,6 +160,7 @@ def run_packs(cfg, run_id, catalog_path=None):
         dbs, tables = _maps(writer, run_dir)
         packs = [load_pack(p) for p in cfg.pack_paths()]
         for pack in packs:
+            _apply_confirmations(writer, tables, pack)
             for item in pack["terms"]:
                 term = str(item.get("term", "")).strip()
                 meaning = str(item.get("meaning", "")).strip()
