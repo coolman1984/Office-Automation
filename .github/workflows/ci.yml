@@ -41,3 +41,4 @@ jobs:
           tests.test_init_doctor
           tests.test_report
           tests.test_status
+          tests.test_platform_e2e
