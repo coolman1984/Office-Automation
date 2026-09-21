@@ -9,7 +9,7 @@ from xl2ai.contextpack import build_context_pack
 from xl2ai.core.config import load_config
 from xl2ai.core.errors import Xl2aiError
 from xl2ai.core.runs import Run
-from xl2ai.query import sample, sql, trace
+from xl2ai.query import compare, sample, sql, trace
 
 
 class TestContextAndQuery(unittest.TestCase):
@@ -66,6 +66,13 @@ class TestContextAndQuery(unittest.TestCase):
         tr=trace(self.cfg,"t1",3,run_id=self.run.id)
         self.assertEqual(tr["rows"][0][1],2)
         self.assertEqual(tr["evidence"][0]["xl_row"],3)
+
+    def test_compare_reads_capped_deterministic_changes(self):
+        out=compare(self.cfg,"volume",run_id=self.run.id)
+        self.assertEqual(out["row_count"],1)
+        self.assertEqual(out["rows"][0][0],"volume")
+        self.assertEqual(out["rows"][0][3],2)
+        self.assertEqual(out["rows"][0][4],3)
 
     def test_sql_is_read_only(self):
         ok=sql(self.cfg,"s","SELECT COUNT(*) AS n FROM data",run_id=self.run.id)

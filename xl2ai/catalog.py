@@ -36,6 +36,10 @@ CREATE TABLE _columns (
 CREATE TABLE _table_profiles (
   table_id TEXT PRIMARY KEY, row_count INTEGER NOT NULL, row_fingerprint TEXT, row_hash_mode TEXT
 );
+CREATE TABLE _row_hashes (
+  table_id TEXT NOT NULL, row_hash TEXT NOT NULL, n INTEGER NOT NULL,
+  PRIMARY KEY(table_id, row_hash)
+);
 CREATE TABLE _profile_columns (
   column_id TEXT PRIMARY KEY, n INTEGER, nulls INTEGER, distinct_count INTEGER, min_value TEXT, max_value TEXT,
   mean REAL, top_k TEXT, sample TEXT

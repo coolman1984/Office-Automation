@@ -99,7 +99,13 @@ class TestChanges(unittest.TestCase):
         c.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",("t.c1","t",1,"category","Category",1,"A","TEXT","text",rows,0))
         c.execute("INSERT INTO _profile_columns VALUES (?,?,?,?,?,?,?,?,?)",
                   ("t.c1",rows,0,2,"A","B",None,'[["A",3],["B",2]]','["A","B"]'))
-        c.execute("INSERT INTO _table_profiles VALUES (?,?,?,?)",("t",rows,rowfp,"ordered_sha256"))
+        c.execute("INSERT INTO _table_profiles VALUES (?,?,?,?)",("t",rows,rowfp,"multiset_sha256"))
+        hashes=[("same",min(rows,4))]
+        if rows <= 5:
+            hashes.append(("old-only",1))
+        else:
+            hashes.append(("new-only",rows-min(rows,4)))
+        c.executemany("INSERT INTO _row_hashes VALUES (?,?,?)",(("t",h,n) for h,n in hashes))
         c.execute("INSERT INTO _kpi_results VALUES (?,?,?,?,?,?,?,?)",("sales","p","1",kpi,"EGP","{}","p","{}"))
         c.commit(); c.close()
 
@@ -108,7 +114,7 @@ class TestChanges(unittest.TestCase):
         c=sqlite3.connect(self.r2.path("catalog.db"))
         kinds={r[0] for r in c.execute("SELECT kind FROM _changes")}
         c.close()
-        self.assertTrue({"source","schema","volume","value","kpi"}.issubset(kinds))
+        self.assertTrue({"source","schema","volume","value","row","kpi"}.issubset(kinds))
 
 
 if __name__=="__main__":

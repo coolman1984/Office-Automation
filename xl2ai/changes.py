@@ -67,20 +67,42 @@ def detect_changes(cfg, run_id, previous_run_id=None, catalog_path=None):
                 elif old_sources[sid] != new_sources[sid]:
                     _insert(con, "source", "info", sid, old_sources[sid], new_sources[sid])
 
-            def tmap(db):
-                rows = db.execute("""SELECT table_id,source_id,sheet_name,row_count,schema_fingerprint
-                                     FROM _tables""").fetchall()
-                return {(r[1], r[2]): r for r in rows}
-            old_t, new_t = tmap(prev), tmap(con)
-            for key in sorted(set(old_t) | set(new_t)):
-                subject = f"{key[0]}/{key[1]}"
-                if key not in old_t:
-                    _insert(con, "schema", "info", subject, None, {"table_id": new_t[key][0]})
+            def table_rows(db):
+                return db.execute("""SELECT table_id,source_id,sheet_name,row_count,schema_fingerprint
+                                     FROM _tables ORDER BY source_id,sheet_name""").fetchall()
+
+            old_rows, new_rows = table_rows(prev), table_rows(con)
+            old_exact = {(r[1], r[2]): r for r in old_rows}
+            new_exact = {(r[1], r[2]): r for r in new_rows}
+            pairs, used_old, used_new = [], set(), set()
+
+            for key in sorted(set(old_exact) & set(new_exact)):
+                pairs.append((f"{key[0]}/{key[1]}", old_exact[key], new_exact[key]))
+                used_old.add(old_exact[key][0])
+                used_new.add(new_exact[key][0])
+
+            # Rename detection: unmatched table with same source and identical schema fingerprint.
+            for n in new_rows:
+                if n[0] in used_new:
                     continue
-                if key not in new_t:
-                    _insert(con, "schema", "warn", subject, {"table_id": old_t[key][0]}, None)
-                    continue
-                o, n = old_t[key], new_t[key]
+                candidates = [o for o in old_rows if o[0] not in used_old and o[1] == n[1] and o[4] == n[4]]
+                if len(candidates) == 1:
+                    o = candidates[0]
+                    subject = f"{n[1]}/{o[2]}->{n[2]}"
+                    _insert(con, "schema", "info", subject, {"sheet": o[2]}, {"sheet": n[2]},
+                            {"rename_detected": True, "schema_fingerprint": n[4]})
+                    pairs.append((subject, o, n))
+                    used_old.add(o[0])
+                    used_new.add(n[0])
+
+            for o in old_rows:
+                if o[0] not in used_old:
+                    _insert(con, "schema", "warn", f"{o[1]}/{o[2]}", {"table_id": o[0]}, None)
+            for n in new_rows:
+                if n[0] not in used_new:
+                    _insert(con, "schema", "info", f"{n[1]}/{n[2]}", None, {"table_id": n[0]})
+
+            for subject, o, n in pairs:
                 if o[4] != n[4]:
                     _insert(con, "schema", "warn", subject, o[4], n[4])
                 if int(o[3]) != int(n[3]):
@@ -93,6 +115,17 @@ def detect_changes(cfg, run_id, previous_run_id=None, catalog_path=None):
                 if old_fp and new_fp and old_fp[0] and new_fp[0] and old_fp[0] != new_fp[0]:
                     _insert(con, "value", "info", subject, old_fp[0], new_fp[0],
                             {"mode_before": old_fp[1], "mode_after": new_fp[1]})
+
+                old_hashes = dict(prev.execute("SELECT row_hash,n FROM _row_hashes WHERE table_id=?", (o[0],)).fetchall())
+                new_hashes = dict(con.execute("SELECT row_hash,n FROM _row_hashes WHERE table_id=?", (n[0],)).fetchall())
+                if old_hashes or new_hashes:
+                    added = sum(max(0, new_hashes.get(h, 0) - old_hashes.get(h, 0))
+                                for h in set(old_hashes) | set(new_hashes))
+                    removed = sum(max(0, old_hashes.get(h, 0) - new_hashes.get(h, 0))
+                                  for h in set(old_hashes) | set(new_hashes))
+                    if added or removed:
+                        _insert(con, "row", "info", subject, {"removed": removed}, {"added": added},
+                                {"method": "row_hash_multiset", "content_not_stored": True})
 
                 old_cols = {r[0]: r[1] for r in prev.execute(
                     """SELECT c.name,p.top_k FROM _columns c JOIN _profile_columns p ON p.column_id=c.column_id

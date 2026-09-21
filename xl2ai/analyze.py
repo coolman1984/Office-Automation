@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import math
@@ -39,14 +40,26 @@ def _value(v):
 
 
 def _row_fingerprint(src, table_name, row_count, max_rows):
+    """Content fingerprint plus a row-hash multiset, ignoring Excel row position.
+
+    Reordering identical business rows should not look like a data change. The multiset also lets change detection say
+    how many rows were added/removed even when the table has no trusted key.
+    """
     if max_rows <= 0 or row_count > max_rows:
-        return None, "omitted"
-    h = hashlib.sha256()
-    cur = src.execute(f"SELECT * FROM {q(table_name)} ORDER BY _xl_row")
+        return None, "omitted", None
+    counts = Counter()
+    cur = src.execute(f"SELECT * FROM {q(table_name)}")
     for row in cur:
-        h.update(_json([_value(v) for v in row]).encode("utf-8", "surrogatepass"))
+        business = row[1:] if row and isinstance(row[0], int) else row
+        rh = hashlib.sha256(_json([_value(v) for v in business]).encode("utf-8", "surrogatepass")).hexdigest()
+        counts[rh] += 1
+    h = hashlib.sha256()
+    for rh, n in sorted(counts.items()):
+        h.update(rh.encode())
+        h.update(b":")
+        h.update(str(n).encode())
         h.update(b"\n")
-    return h.hexdigest(), "ordered_sha256"
+    return h.hexdigest(), "multiset_sha256", counts
 
 
 def _column_profile(src, table_name, name, sql_type, kind, row_count, top_k, sample_values):
@@ -91,6 +104,7 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
     try:
         con.execute("DELETE FROM _profile_columns")
         con.execute("DELETE FROM _table_profiles")
+        con.execute("DELETE FROM _row_hashes")
         con.execute("DELETE FROM _dq_findings")
         con.execute("DELETE FROM _keys")
         tables = con.execute("""SELECT table_id,table_name,db_rel,row_count,header_row,column_count
@@ -120,9 +134,13 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                         if int(merged or 0):
                             _add_finding(con, "DQ_MERGED_IN_DATA", "warn", table_id, None, 1, [],
                                          "merged cells exist inside the data region; only top-left cells carry values")
-                row_fp, row_mode = _row_fingerprint(src, table_name, int(row_count), cfg.analysis["row_hash_max_rows"])
+                row_fp, row_mode, row_hashes = _row_fingerprint(
+                    src, table_name, int(row_count), cfg.analysis["row_hash_max_rows"])
                 con.execute("INSERT INTO _table_profiles VALUES (?,?,?,?)",
                             (table_id, int(row_count), row_fp, row_mode))
+                if row_hashes:
+                    con.executemany("INSERT INTO _row_hashes VALUES (?,?,?)",
+                                    ((table_id, rh, n) for rh, n in row_hashes.items()))
                 cols = con.execute("""SELECT column_id,name,sql_type,kind,non_null,error_cells,original_header
                                       FROM _columns WHERE table_id=? ORDER BY position""", (table_id,)).fetchall()
                 candidate_cols = []

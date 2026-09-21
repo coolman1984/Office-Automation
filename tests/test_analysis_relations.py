@@ -70,11 +70,13 @@ class TestAnalyzeRelations(unittest.TestCase):
         keys=con.execute("SELECT COUNT(*) FROM _keys WHERE method='single_column_uniqueness'").fetchone()[0]
         null_tokens=con.execute("SELECT COUNT(*) FROM _dq_findings WHERE code='DQ_NULL_TOKEN'").fetchone()[0]
         hashes=con.execute("SELECT COUNT(*) FROM _table_profiles WHERE row_fingerprint IS NOT NULL").fetchone()[0]
+        row_hashes=con.execute("SELECT COUNT(*) FROM _row_hashes").fetchone()[0]
         con.close()
         self.assertEqual(profiles,5)
         self.assertGreaterEqual(keys,2)
         self.assertEqual(null_tokens,1)
         self.assertEqual(hashes,2)
+        self.assertGreater(row_hashes,0)
 
     def test_infers_customer_relationship_but_not_small_text_domain(self):
         analyze_catalog(self.cfg,self.run.id,self.catalog)

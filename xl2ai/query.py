@@ -145,6 +145,24 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
                      truncated=truncated)
 
 
+def compare(cfg, kind=None, run_id=None):
+    """Return the bounded run-to-run differences already computed by the deterministic change stage."""
+    started=time.perf_counter()
+    rid,run_dir,catp=_run_paths(cfg,run_id)
+    with _catalog(catp) as cat:
+        if kind:
+            cur=cat.execute("""SELECT kind,severity,subject,before_value,after_value,evidence
+                               FROM _changes WHERE kind=? ORDER BY severity,subject""",(kind,))
+        else:
+            cur=cat.execute("""SELECT kind,severity,subject,before_value,after_value,evidence
+                               FROM _changes ORDER BY kind,severity,subject""")
+        columns,rows,truncated=_cap_rows(cur,cfg)
+    decoded=[]
+    for row in rows:
+        decoded.append(row[:3]+[json.loads(x) if x else None for x in row[3:]])
+    return _envelope("compare",columns,decoded,started,cfg,evidence=[{"run_id":rid}],truncated=truncated)
+
+
 def trace(cfg, selector, xl_row, run_id=None):
     started=time.perf_counter()
     rid,run_dir,catp=_run_paths(cfg,run_id)
@@ -200,6 +218,8 @@ def main(argv=None):
     a.add_argument("column")
     a.add_argument("--op",default="count")
     a.add_argument("--group-by")
+    c=sub.add_parser("compare")
+    c.add_argument("--kind")
     t=sub.add_parser("trace")
     t.add_argument("table")
     t.add_argument("xl_row",type=int)
@@ -217,6 +237,8 @@ def main(argv=None):
             out=sample(cfg,args.table,args.limit)
         elif args.cmd=="aggregate":
             out=aggregate(cfg,args.table,args.column,args.op,args.group_by)
+        elif args.cmd=="compare":
+            out=compare(cfg,args.kind)
         elif args.cmd=="trace":
             out=trace(cfg,args.table,args.xl_row)
         else:
