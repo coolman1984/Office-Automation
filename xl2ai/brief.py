@@ -1,0 +1,169 @@
+"""`xl2ai brief`: the one call a cold agent makes first.
+
+Answers, in a single bounded call: which run is current, is it fresh, is each table safe to use, what the
+platform could not fully resolve, and what to run next. Everything here is derived from artifacts other stages
+already produced (manifest, catalog, quality findings, rule results) -- brief computes no new facts of its own.
+
+Exit codes: 0 ready | 1 needs review (usable, but read the gaps first) | 2 not ready (stale, unpromoted or failed).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+
+from .core.config import load_config
+from .core.errors import Xl2aiError
+from .core.runs import current_run_id, load_manifest
+from .status import compute_status
+
+
+def _table_columns(con, table):
+    try:
+        return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
+    except sqlite3.DatabaseError:
+        return set()
+
+
+def build_brief(cfg, run_id=None):
+    status, status_code = compute_status(cfg, deep=False)
+    rid = run_id or current_run_id(cfg)
+    out = {"project": cfg.project, "run_id": rid, "fresh": status.get("sources_fresh"),
+           "status_code": status_code, "tables": [], "gaps": [], "next_commands": []}
+    if not rid:
+        out["gaps"].append({"kind": "no_run", "message": "no run has ever been promoted"})
+        out["next_commands"].append("xl2ai refresh")
+        return out, 2
+    manifest = load_manifest(cfg, rid)
+    run_dir = os.path.join(cfg.runs_dir, rid)
+    catalog_path = os.path.join(run_dir, "catalog.db")
+    if not os.path.isfile(catalog_path):
+        out["gaps"].append({"kind": "no_catalog", "message": f"run {rid} has no catalog.db"})
+        out["next_commands"].append("xl2ai refresh")
+        return out, 2
+
+    extract_stage = next((s for s in manifest.get("stages", []) if s["name"] == "extract"), None)
+    verify_mismatches = {r["source_id"]: int(r.get("verify_mismatches", 0) or 0)
+                          for r in (extract_stage or {}).get("details", {}).get("sources", [])}
+
+    con = sqlite3.connect(f"file:{os.path.abspath(catalog_path)}?mode=ro", uri=True)
+    try:
+        has_unsupported = "_unsupported" in {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        for tid, sid, sheet, table_name, rows in con.execute(
+            "SELECT table_id,source_id,sheet_name,table_name,row_count FROM _tables ORDER BY table_id"):
+            errors = con.execute(
+                "SELECT COUNT(*) FROM _dq_findings WHERE table_id=? AND severity='error'", (tid,)).fetchone()[0]
+            warnings = con.execute(
+                "SELECT COUNT(*) FROM _dq_findings WHERE table_id=? AND severity='warn'", (tid,)).fetchone()[0]
+            blind_spots = 0
+            if has_unsupported:
+                blind_spots = con.execute(
+                    "SELECT COUNT(*) FROM _unsupported WHERE table_id=?", (tid,)).fetchone()[0]
+            mismatches = verify_mismatches.get(sid, 0)
+            if mismatches:
+                readiness = "not_ready"
+            elif errors or blind_spots:
+                readiness = "needs_review"
+            else:
+                readiness = "ready"
+            out["tables"].append({"table_id": tid, "source_id": sid, "sheet": sheet, "table_name": table_name,
+                                   "rows": int(rows), "readiness": readiness, "quality_errors": errors,
+                                   "quality_warnings": warnings, "blind_spots": blind_spots,
+                                   "verify_mismatches": mismatches})
+
+        rule_errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
+        rule_failures = con.execute(
+            "SELECT COUNT(*) FROM _rule_results WHERE status='fail' AND severity='error'").fetchone()[0]
+        changes = con.execute("SELECT COUNT(*) FROM _changes").fetchone()[0]
+    finally:
+        con.close()
+
+    if not status.get("sources_fresh"):
+        out["gaps"].append({"kind": "stale", "message": "one or more sources changed since this run",
+                            "detail": status.get("changes")})
+    if manifest.get("status") != "passed" or not manifest.get("promoted"):
+        out["gaps"].append({"kind": "not_promoted", "message": f"run status is '{manifest.get('status')}'"})
+    if rule_errors:
+        out["gaps"].append({"kind": "rule_errors", "message": f"{rule_errors} rule(s) could not execute"})
+    if rule_failures:
+        out["gaps"].append({"kind": "rule_failures", "message": f"{rule_failures} blocking business rule(s) failed"})
+    not_ready = [t for t in out["tables"] if t["readiness"] == "not_ready"]
+    needs_review = [t for t in out["tables"] if t["readiness"] == "needs_review"]
+    for t in not_ready:
+        out["gaps"].append({"kind": "verification_mismatch", "table_id": t["table_id"],
+                            "message": "stored data did not verify against Excel; do not trust this table"})
+    for t in needs_review:
+        if t["blind_spots"]:
+            out["gaps"].append({"kind": "blind_spot", "table_id": t["table_id"],
+                                "message": f"{t['blind_spots']} thing(s) in this sheet could not be fully read "
+                                           "(see query meta quality)"})
+        if t["quality_errors"]:
+            out["gaps"].append({"kind": "quality_error", "table_id": t["table_id"],
+                                "message": f"{t['quality_errors']} error-severity quality finding(s)"})
+
+    out["changes_since_previous"] = changes
+    out["next_commands"] = ["xl2ai query schema"]
+    if not status.get("sources_fresh"):
+        out["next_commands"] = ["xl2ai refresh"] + out["next_commands"]
+    if changes:
+        out["next_commands"].append("xl2ai query compare")
+    if needs_review or not_ready:
+        out["next_commands"].append("xl2ai query meta quality")
+
+    if not_ready or not status.get("sources_fresh") or manifest.get("status") != "passed" or not manifest.get("promoted"):
+        code = 2
+    elif needs_review or rule_errors or rule_failures:
+        code = 1
+    else:
+        code = 0
+    return out, code
+
+
+def _render(out):
+    lines = [f"project: {out['project']}", f"run: {out['run_id']}", f"fresh: {out['fresh']}"]
+    for t in out["tables"]:
+        flags = []
+        if t["quality_errors"]:
+            flags.append(f"{t['quality_errors']} error(s)")
+        if t["blind_spots"]:
+            flags.append(f"{t['blind_spots']} blind spot(s)")
+        flag_text = f" [{', '.join(flags)}]" if flags else ""
+        lines.append(f"  {t['readiness']:<12} {t['table_id']:<40} {t['rows']:>10,} rows{flag_text}")
+    if out["gaps"]:
+        lines.append("gaps:")
+        for g in out["gaps"]:
+            lines.append(f"  - {g['kind']}: {g['message']}")
+    else:
+        lines.append("gaps: none")
+    lines.append("next: " + " | ".join(out["next_commands"]))
+    return "\n".join(lines) + "\n"
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="xl2ai brief",
+                                 description="Orient a cold agent in one call: readiness, gaps, next commands.")
+    ap.add_argument("--config")
+    ap.add_argument("--run")
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+    try:
+        cfg = load_config(args.config)
+        out, code = build_brief(cfg, args.run)
+    except Xl2aiError as e:
+        if args.json:
+            print(json.dumps({"ok": False, "error": e.as_dict()}, ensure_ascii=False))
+        else:
+            print(str(e), file=sys.stderr)
+        return 5
+    if args.json:
+        print(json.dumps(out, indent=1, ensure_ascii=False))
+    else:
+        print(_render(out), end="")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

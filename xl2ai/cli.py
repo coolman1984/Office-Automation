@@ -17,6 +17,7 @@ STAGES = {
     "watch": ("xl2ai.console.app", "main", "refresh with a live step-by-step view (--demo to see it without Excel)"),
     "diagnose": ("xl2ai.console.app", "diagnose_main", "explain what a run did and where it failed (--ai for AI help)"),
     "status": ("xl2ai.status", "main", "show the current dataset, its freshness and the last attempt"),
+    "brief": ("xl2ai.brief", "main", "one-call orientation for a cold agent: readiness, gaps, next commands"),
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),
     "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite via Excel COM, verified against Excel (stand-alone)"),
     "catalog": ("xl2ai.catalog", "main", "build stable source/table/column identities for a run"),

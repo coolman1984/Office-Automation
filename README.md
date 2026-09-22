@@ -29,6 +29,7 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Human-readable project report and environment doctor.
 - Installable package and `xl2ai` command.
 - Live, step-by-step run view (`xl2ai watch`) and post-run failure diagnosis (`xl2ai diagnose`), both usable without Excel via `--demo`.
+- One-call cold-agent orientation (`xl2ai brief`): readiness per table, explicit gaps, ordered next commands.
 
 ## Install
 
@@ -65,6 +66,7 @@ data/
 ## Daily use
 
 ```powershell
+xl2ai brief
 xl2ai status
 xl2ai status --deep
 xl2ai refresh

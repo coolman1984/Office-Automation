@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.5.0 - Agent readiness, phase 1: a truthful entry point (2026-09-22)
+
+* Added `xl2ai brief`: one bounded call that orients a cold agent — current run, freshness, a per-table readiness
+  verdict (`ready`/`needs_review`/`not_ready`) derived from verification and quality findings, an explicit `gaps`
+  list, and ordered `next_commands`. Exit codes: 0 ready, 1 needs review, 2 not ready.
+* Rewrote `skills/platform-overview/SKILL.md`: it previously told agents that every stage after `extract` was
+  still "planned" and to "not invent" commands that had in fact shipped long ago — any agent obeying it would
+  bypass the whole platform and read Excel directly. It now lists every shipped command and states the platform's
+  actual purpose (pre-digest workbooks once so later agents never re-derive that understanding from raw Excel).
+* Added `skills/agent-start/SKILL.md`: the concrete first command a cold agent runs, and how to read `brief`'s
+  exit code and `gaps` before proceeding.
+* Added `skills/query-playbook/SKILL.md`: a question -> tool map for the query layer, with an explicit "stop
+  reading here" rule per tool and the trust-discipline reminders (cite evidence, never flatten inferred into
+  confirmed, never silently drop a flagged gap from an answer).
+
+See `AGENT_READINESS_PLAN.md` for the full six-phase plan this starts.
+
 ## 0.4.0 - Observability: live run view and failure diagnosis (2026-09-22)
 
 * Added `xl2ai watch`: refreshes with a live, step-by-step terminal view built on a new dependency-free `xl2ai/ui/`
