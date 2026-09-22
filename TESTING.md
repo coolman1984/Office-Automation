@@ -6,6 +6,7 @@ All commands are PowerShell. Excel must be installed for integration and golden 
 python -m unittest discover -s tests                 # everything (about 2-7 min; fixtures are built by real Excel once per run)
 $env:XL2SQL_PERF = "1"; python -m unittest discover -s tests   # + 200k x 12 timing test
 python -m unittest tests.test_structure              # fast, no Excel
+python -m unittest tests.test_platform_e2e            # whole post-extraction chain, no Excel
 python -m unittest tests.test_golden                 # byte-level regression only
 ```
 
@@ -16,6 +17,10 @@ python -m unittest tests.test_golden                 # byte-level regression onl
 | `test_golden.py` | output is byte-identical to `tests/golden/fingerprints.json` (2 synthetic + 2 specimen databases) |
 | `test_structure.py` | every global name resolves; platform has no specimen words; platform never imports packs; entry points work |
 | `test_incremental_refresh.py` | unchanged-source reuse, invalidation on data/extract-setting change, self-contained reused DBs |
+| `test_catalog.py` + `test_analysis_relations.py` | catalog/profile/quality/key/relation contracts |
+| `test_rules_changes.py` | packs, KPIs, confirmations and run-to-run changes |
+| `test_context_query.py` | context budget, query caps, read-only SQL and evidence |
+| `test_platform_e2e.py` | cross-stage compatibility from extraction DB through report/context/query |
 
 Fixtures: `tests/make_fixtures.py` builds them with Excel (`fixture_cache.py` shares one build per test run).
 Case list and coverage status: `EDGE_CASES.md`.

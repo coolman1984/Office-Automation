@@ -13,7 +13,7 @@ from ..core.procs import kill_pid
 from ..sources.detect import sniff_file
 from ..sources.inventory import expand_paths
 from .com import ExcelDied, ExcelSession, com_msg
-from .common import SCHEMA_VERSION, VISIBILITY, log, pywintypes
+from .common import PYWIN32_AVAILABLE, SCHEMA_VERSION, VISIBILITY, log, pywintypes
 from .names import sanitize_table
 from .sheet import SheetResult, extract_sheet
 from .store import open_db, resolve_db_path, write_log
@@ -177,6 +177,9 @@ def main(argv=None):
     ap.add_argument("--open-timeout", type=int, default=180, help="seconds before a hung open is killed")
     ap.add_argument("--visible", action="store_true", help="show the Excel window (debugging)")
     opts = ap.parse_args(argv)
+    if os.name != "nt" or not PYWIN32_AVAILABLE:
+        log("ERROR", "Excel extraction requires Windows, Microsoft Excel and pywin32. Metadata/query commands can still run.")
+        return 1
     opts.sheets = {s.strip().lower() for s in opts.sheet}
     opts.wrapper_prefixes = wrapper_prefixes_or_empty()       # from xl2ai.toml if one is found, else none
 

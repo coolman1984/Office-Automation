@@ -96,6 +96,12 @@ class TestRunFinishAndPromotion(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_empty_run_never_promotes(self):
+        run = runsmod.Run.create(self.cfg)
+        self.assertFalse(run.finish())
+        self.assertEqual(run.m["status"], "failed")
+        self.assertIsNone(runsmod.current_run_id(self.cfg))
+
     def test_all_passed_promotes(self):
         run = runsmod.Run.create(self.cfg)
         with run.stage("a"):
@@ -215,17 +221,19 @@ class TestLock(unittest.TestCase):
         with runsmod.Lock(self.cfg):
             self.assertTrue(os.path.exists(self.cfg.lock_file))
 
-    def test_stale_by_age_is_taken_over_even_if_process_exists(self):
-        # lock_stale_hours=1: our own pid is alive (so liveness alone would not free it), but the lock is 2h old
+    def test_old_lock_is_not_taken_over_while_owner_is_alive(self):
+        # Age may indicate a suspiciously long run, but it is never permission to overlap two live refreshes.
         cfg = make_cfg(self.tmp.name, "[refresh]\nlock_stale_hours = 1\n")
         os.makedirs(os.path.dirname(cfg.lock_file), exist_ok=True)
         with open(cfg.lock_file, "w", encoding="utf-8") as f:
             json.dump({"pid": os.getpid(), "started": "x", "epoch": time.time() - 7200}, f)
-        with runsmod.Lock(cfg):
-            self.assertTrue(os.path.exists(cfg.lock_file))
+        with self.assertRaises(Xl2aiError) as ctx:
+            runsmod.Lock(cfg).acquire()
+        self.assertEqual(ctx.exception.code, "E_LOCKED")
+        self.assertIn("owner pid is still alive", ctx.exception.message)
 
     def test_lock_stale_hours_zero_disables_the_age_check(self):
-        """0 means 'no age-based grace' (liveness-only), not 'expire instantly' — documented, tested explicitly."""
+        """0 disables the old-lock advisory threshold; live-owner liveness remains authoritative."""
         cfg = make_cfg(self.tmp.name, "[refresh]\nlock_stale_hours = 0\n")
         os.makedirs(os.path.dirname(cfg.lock_file), exist_ok=True)
         with open(cfg.lock_file, "w", encoding="utf-8") as f:
@@ -246,27 +254,31 @@ class TestHardKillGate(unittest.TestCase):
 
     def test_killed_run_never_promotes_and_is_reaped(self):
         helper = os.path.join(ROOT, "tests", "helpers", "slow_run.py")
-        proc = subprocess.Popen([sys.executable, helper, self.cfg.path, "60"], cwd=ROOT,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        before = set(runsmod.list_runs(self.cfg))
+        proc = subprocess.Popen([sys.executable, "-u", helper, self.cfg.path, "60"], cwd=ROOT,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        run_id = None
+        manifest_path = None
         try:
-            run_id = None
-            for _ in range(200):                            # other log lines (e.g. a low-memory warning) may precede it
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                if line.startswith("RUN_ID="):
-                    run_id = line.strip().split("=", 1)[1]
-                    break
-            self.assertTrue(run_id, f"no RUN_ID line from the helper; stderr:\n{proc.stderr.read()}")
-            manifest_path = os.path.join(self.cfg.runs_dir, run_id, "manifest.json")
-            for _ in range(50):                             # wait for the stage to actually be recorded as running
-                if os.path.exists(manifest_path) and read_json(manifest_path)["stages"]:
+            for _ in range(300):
+                created = [r for r in runsmod.list_runs(self.cfg) if r not in before]
+                if created:
+                    candidate = created[0]
+                    p = os.path.join(self.cfg.runs_dir, candidate, "manifest.json")
+                    try:
+                        m = read_json(p)
+                    except (OSError, ValueError):
+                        m = {}
+                    if m.get("stages") and m["stages"][0].get("status") == "running":
+                        run_id, manifest_path = candidate, p
+                        break
+                if proc.poll() is not None:
                     break
                 time.sleep(0.1)
-            self.assertEqual(read_json(manifest_path)["stages"][0]["status"], "running")
+            self.assertTrue(run_id, "helper never reached a durably recorded running stage")
             self.assertTrue(os.path.exists(self.cfg.lock_file), "the lock should still be held at kill time")
         finally:
-            proc.kill()                                     # TerminateProcess: no cleanup code in the child runs
+            proc.kill()                                     # hard stop: child cleanup code must not run
             proc.wait(timeout=10)
 
         self.assertIsNone(runsmod.current_run_id(self.cfg), "a killed run must never become current")

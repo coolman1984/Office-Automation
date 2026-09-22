@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.3.0 - AI-ready platform completion/hardening (2026-09-21)
+
+* Added run catalog with source/sheet/name-based stable identities; schema/type/position drift is tracked separately.
+* Added profiling, generic data-quality findings, candidate keys and conservative relationship inference.
+* Added TOML rule packs with confirmed terms, keys, relationships, deterministic rules and KPIs.
+* Added run-to-run source/schema/volume/value/category/distribution/KPI and exact row-multiset change detection.
+* Added compact token-budgeted AI context pack and capped schema/describe/sample/aggregate/compare/trace/SQL tools.
+* Added SQLite read-only authorizer protection for AI/rule SQL.
+* Added project init, doctor, report and deep SHA-256 status verification.
+* Fixed Windows file-handle leaks by explicitly closing read-only SQLite connections.
+* Added installable package metadata and the `xl2ai` console command.
+* Added Windows/Linux Python 3.11/3.12 CI plus a COM-free cross-stage smoke test.
+
 Output-affecting changes are listed explicitly; the golden fingerprints (`tests/golden/fingerprints.json`) are
 regenerated only together with an entry here.
 

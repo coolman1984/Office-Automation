@@ -1,10 +1,13 @@
-"""Constants shared by the extraction modules and the console logger."""
+"""Constants shared by extraction modules.
+
+Importing xl2ai on a machine without pywin32 must remain possible so metadata/query stages and CI can run. The actual
+extract command checks PYWIN32_AVAILABLE before touching COM.
+"""
 from __future__ import annotations
 
-import sys
+from ..core.log import log
 
-from ..core.log import log  # noqa: F401  (re-exported: extract modules import it from here)
-
+PYWIN32_AVAILABLE = True
 try:
     import pythoncom
     import pywintypes
@@ -13,8 +16,8 @@ try:
     import win32gui
     import win32process
 except ImportError:
-    print("ERROR: pywin32 is not installed. Run:  pip install pywin32")
-    sys.exit(1)
+    PYWIN32_AVAILABLE = False
+    pythoncom = pywintypes = win32api = win32 = win32gui = win32process = None
 
 SCHEMA_VERSION = 1
 XL_CALC_MANUAL = -4135
@@ -28,6 +31,6 @@ MAX_SAFE_INT = 2 ** 53
 HEADER_SCAN_ROWS = 30
 PROCESS_TERMINATE, PROCESS_QUERY_LIMITED = 0x0001, 0x1000
 STILL_ACTIVE = 259
-BUSY_CODES = {-2147418111, -2147417846}                                  # call rejected / retry later
-DEAD_CODES = {-2147023174, -2147023170, -2147023169, -2147417848, -2147417836}  # RPC unavailable/failed/disconnected
+BUSY_CODES = {-2147418111, -2147417846}
+DEAD_CODES = {-2147023174, -2147023170, -2147023169, -2147417848, -2147417836}
 NoneType = type(None)

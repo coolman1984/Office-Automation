@@ -29,7 +29,11 @@ def now_iso():
 
 # ------------------------------------------------------------------------------------------------ lock
 class Lock:
-    """Exclusive refresh lock: O_EXCL create; a lock whose owner is dead (or too old) is taken over."""
+    """Exclusive refresh lock.
+
+    A live owner is never displaced just because the lock is old. Age is advisory only; takeover requires the
+    recorded owner process to be gone (or an unreadable half-created lock to remain abandoned long enough).
+    """
 
     def __init__(self, cfg):
         self.cfg, self.path, self.held = cfg, cfg.lock_file, False
@@ -48,8 +52,7 @@ class Lock:
                 return True
         if not pid_alive(info.get("pid")):
             return True
-        limit = self.cfg.lock_stale_hours * 3600
-        return bool(limit) and time.time() - info.get("epoch", time.time()) > limit
+        return False
 
     def acquire(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -65,9 +68,14 @@ class Lock:
                     except OSError:
                         pass
                     continue
+                age = time.time() - float(info.get("epoch", time.time()))
+                limit = self.cfg.lock_stale_hours * 3600
+                old_note = ""
+                if limit and age > limit:
+                    old_note = f"; lock is older than {self.cfg.lock_stale_hours}h but owner pid is still alive"
                 raise Xl2aiError("E_LOCKED", f"another refresh is running (pid {info.get('pid')}, "
-                                             f"since {info.get('started')})",
-                                 "wait for it, or delete the lock file only if you are sure nothing is running") from None
+                                             f"since {info.get('started')}{old_note})",
+                                 "wait for it; never delete a lock while its owner process is alive") from None
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"pid": os.getpid(), "started": now_iso(), "epoch": time.time()}, f)
             self.held = True
@@ -96,8 +104,19 @@ class Lock:
 def list_runs(cfg):
     if not os.path.isdir(cfg.runs_dir):
         return []
-    return sorted((d for d in os.listdir(cfg.runs_dir) if os.path.isfile(os.path.join(cfg.runs_dir, d, "manifest.json"))),
-                  reverse=True)
+    items = []
+    for d in os.listdir(cfg.runs_dir):
+        manifest = os.path.join(cfg.runs_dir, d, "manifest.json")
+        if not os.path.isfile(manifest):
+            continue
+        try:
+            m = read_json(manifest)
+            order = float(m.get("started_epoch", os.path.getmtime(manifest)))
+        except (OSError, ValueError, TypeError):
+            order = os.path.getmtime(manifest)
+        items.append((order, d))
+    items.sort(reverse=True)
+    return [d for _, d in items]
 
 
 def load_manifest(cfg, run_id):
@@ -176,7 +195,7 @@ class Run:
         run_id = time.strftime("%Y%m%dT%H%M%S") + "-" + os.urandom(2).hex()
         mem = memory_status()
         manifest = {"contract_version": CONTRACT_VERSION, "run_id": run_id, "project": cfg.project,
-                    "started": now_iso(), "finished": None, "status": "running", "promoted": False,
+                    "started": now_iso(), "started_epoch": time.time(), "finished": None, "status": "running", "promoted": False,
                     "config_fingerprint": cfg.fingerprint(), "extract_fingerprint": cfg.extract_fingerprint(),
                     "platform": {"python": platform.python_version(), "pid": os.getpid(), "memory": mem},
                     "inputs": [], "stages": []}
@@ -210,7 +229,10 @@ class Run:
     def finish(self):
         """Decide the run status and promote it if (and only if) it earned it. Returns True if promoted."""
         statuses = {s["status"] for s in self.m["stages"]}
-        if statuses <= {"passed"}:
+        if not statuses:
+            status = "failed"
+            self.m.setdefault("notes", []).append("run had no stages and cannot be promoted")
+        elif statuses <= {"passed"}:
             status = "passed"
         elif statuses & {"failed", "interrupted", "running"}:
             status = "failed"

@@ -17,6 +17,7 @@ from .core.errors import Xl2aiError
 from .core.fsutil import atomic_write_json
 from .core.log import log
 from .core.runs import CONTRACT_VERSION, Lock, Run, current_run_id, load_manifest, now_iso, reap_orphans
+from .core.sqliteutil import ro_connection
 from .sources.inventory import build_inventory
 
 
@@ -99,6 +100,84 @@ def materialize_reuse(src, dst):
         return "copy"
 
 
+def stage_audit(run, st, cfg, ctx):
+    from .audit import audit_run
+    result=audit_run(cfg,run.id,deep=False,catalog_path=ctx.get("catalog"))
+    st.detail("checks",result["checks"])
+    st.detail("issues",len(result["issues"]))
+    if not result["ok"]:
+        first=result["issues"][0]
+        st.fail("E_AUDIT",f"{len(result['issues'])} integrity issue(s); first: {first['code']}",
+                "run 'xl2ai audit --run <run_id> --deep' for a full check")
+
+
+def stage_report(run, st, cfg, ctx):
+    from .report import write_report
+    path, _ = write_report(cfg, run.id)
+    st.artifact(path)
+
+
+def stage_contextpack(run, st, cfg, ctx):
+    from .contextpack import build_context_pack
+    jp, mp, payload = build_context_pack(cfg, run.id, ctx.get("catalog"))
+    st.artifact(jp)
+    st.artifact(mp)
+    st.detail("est_tokens", payload["est_tokens"])
+    st.detail("hash", payload["hash"])
+
+
+def stage_changes(run, st, cfg, ctx):
+    from .changes import detect_changes
+    path = detect_changes(cfg, run.id, catalog_path=ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    st.detail("changes", con.execute("SELECT COUNT(*) FROM _changes").fetchone()[0])
+    con.close()
+
+
+def stage_rules(run, st, cfg, ctx):
+    from .rules import run_packs
+    path = run_packs(cfg, run.id, ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    failed = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='fail'").fetchone()[0]
+    errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
+    st.detail("failed_rules", failed)
+    st.detail("rule_errors", errors)
+    if errors:
+        st.fail("E_RULE", f"{errors} rule(s) could not execute")
+    elif cfg.block_on_rule_error:
+        blocking = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='fail' AND severity='error'").fetchone()[0]
+        if blocking:
+            st.fail("E_RULE", f"{blocking} blocking business rule(s) failed")
+    con.close()
+
+
+def stage_relations(run, st, cfg, ctx):
+    from .relations import infer_relations
+    path = infer_relations(cfg, run.id, ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    n = con.execute("SELECT COUNT(*) FROM _relationships").fetchone()[0]
+    con.close()
+    st.detail("relationships", n)
+
+
+def stage_analyze(run, st, cfg, ctx):
+    from .analyze import analyze_catalog
+    path = analyze_catalog(cfg, run.id, ctx.get("catalog"))
+    con = sqlite3.connect(path)
+    st.detail("quality_findings", con.execute("SELECT COUNT(*) FROM _dq_findings").fetchone()[0])
+    st.detail("candidate_keys", con.execute("SELECT COUNT(*) FROM _keys").fetchone()[0])
+    con.close()
+
+
+def stage_catalog(run, st, cfg, ctx):
+    from .catalog import build_catalog
+    path = build_catalog(cfg, run.id, run.m)
+    st.artifact(path)
+    with ro_connection(path) as con:
+        st.detail("tables", con.execute("SELECT COUNT(*) FROM _tables").fetchone()[0])
+    ctx["catalog"] = path
+
+
 def stage_extract(run, st, cfg, ctx):
     opts = cfg.extract_options()
     per, codes = [], set()
@@ -150,7 +229,10 @@ def stage_extract(run, st, cfg, ctx):
         st.partial("some sheets failed to extract; the run is not promoted unless allow_partial is set")
 
 
-STAGES = (("sources", stage_sources), ("extract", stage_extract))
+STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
+          ("analyze", stage_analyze), ("relations", stage_relations), ("rules", stage_rules),
+          ("changes", stage_changes), ("audit", stage_audit),
+          ("contextpack", stage_contextpack), ("report", stage_report))
 
 
 def run_refresh(cfg, force=False):

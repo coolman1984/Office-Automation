@@ -10,10 +10,21 @@ import sys
 
 # command -> (module, function, one-line description)
 STAGES = {
+    "init": ("xl2ai.init_project", "main", "create a reusable project config and optional rule-pack skeleton"),
+    "doctor": ("xl2ai.doctor", "main", "check environment, sources, storage and current dataset"),
+    "audit": ("xl2ai.audit", "main", "verify run artifacts and cross-database consistency"),
     "refresh": ("xl2ai.refresh", "main", "run every stage into a new run; promote it only if valid"),
     "status": ("xl2ai.status", "main", "show the current dataset, its freshness and the last attempt"),
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),
     "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite via Excel COM, verified against Excel (stand-alone)"),
+    "catalog": ("xl2ai.catalog", "main", "build stable source/table/column identities for a run"),
+    "analyze": ("xl2ai.analyze", "main", "profile data, flag generic quality issues and infer candidate keys"),
+    "relations": ("xl2ai.relations", "main", "infer conservative relationships between tables"),
+    "rules": ("xl2ai.rules", "main", "run configured deterministic business rules and KPIs"),
+    "changes": ("xl2ai.changes", "main", "compare a run with the previous trusted run"),
+    "pack": ("xl2ai.contextpack", "main", "build a compact deterministic context pack for AI"),
+    "query": ("xl2ai.query", "main", "read-only capped schema/describe/sample/aggregate/trace/sql tools"),
+    "report": ("xl2ai.report", "main", "show one-screen health, rules, KPI and change summary"),
 }
 
 

@@ -4,7 +4,7 @@
 workbooks, it extracts and understands them deterministically, and an AI reads a tiny context pack and queries
 only small slices. The workbooks in `Price Comparison Data/` are **one test specimen**, not the specification.
 
-Status legend: **[built]** exists and is tested, **[phase N]** planned. See `CHANGELOG.md` for what shipped.
+Status legend: **[built]** exists and is tested, **[remaining]** is intentionally not complete. See `CHANGELOG.md` for shipped behavior.
 
 ## 1. Principles (each one is a testable rule)
 
@@ -92,12 +92,13 @@ Boundary rules, enforced by tests: (a) `xl2ai/` never imports `packs/`; packs ar
 interface by path from config; (b) a lint test fails if `xl2ai/` contains any word from a denylist built from the
 specimen files; (c) the whole platform test suite passes with **no pack installed**.
 
-### 3.1 Run model [phase 1]
+### 3.1 Run model [built]
 
 Every refresh creates `data/runs/<run_id>/` with `manifest.json` (stages, status, timings, input fingerprints:
 path, size, mtime, sha256). Stages write only inside their run folder. The run is **promoted** by atomically
 rewriting `data/current.json` only after all required stages pass. A failed/partial run stays inspectable and never
-becomes `current`. Last N runs are kept (default 3). A lock file prevents concurrent refreshes of the same project.
+becomes `current`. Last N runs are kept (default 3). A lock file prevents concurrent refreshes of the same project;
+a live owner is never displaced based on lock age alone.
 
 ### 3.2 Config layering
 
@@ -127,14 +128,12 @@ returning agent does not reread); stable ordering so prompt caching works; every
 Safety: query tools open SQLite `mode=ro`, allow a single SELECT, enforce row/byte/time caps, never expose file
 paths outside the run folder, and never read Excel.
 
-## 5. Project knowledge lives in packs [phase 5]
+## 5. Project knowledge lives in packs [built core]
 
-A rule pack is a folder: `pack.yaml` (name, version, `applies_when` selectors such as sheet-name patterns or
-required columns), `dictionary.yaml` (meanings, aliases, units, column overrides for headerless sheets),
-`rules.yaml` (declarative assertions and reconciliations expressed as SQL over registered tables),
-`calculators.py` (optional; pure functions with declared inputs/outputs, run against a read-only connection).
-Results always carry `rule_id`, `pack`, `pack_version`, evidence. The current Price Comparison workbook gets one
-pack (`packs/specimen_price_comparison/`) used purely as a demanding integration test of the pack mechanism.
+The built pack format is TOML: one `pack.toml` can define confirmed terms, keys, relationships, SQL assertions and
+KPIs. Packs are loaded only from paths declared in project config. Results carry pack/version evidence. Python
+calculator plugins and automatic applies-when selectors remain optional future extensions; they are not silently
+treated as built.
 
 ## 6. Roadmap with regression gates
 

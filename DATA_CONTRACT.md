@@ -6,9 +6,11 @@ additive = minor, breaking = major (a major bump requires a migration note in `C
 
 ## 0. Conventions
 
-* Identifiers: `source_id` (stable id of a source file, from normalized path or config alias), `run_id`
-  (`YYYYMMDDTHHMMSS-<4hex>`), `table_id` (`<source_id>/<sheet_key>/<region>`), `column_id` (`<table_id>.<position>`).
-  In AI-facing output these are shortened to handles (`t3`, `t3.c7`) with a legend.
+* Identifiers: `source_id` (stable id of a source file, preferably from config alias), `run_id`
+  (`YYYYMMDDTHHMMSS-<4hex>`), `table_id` (source id + normalized sheet identity), and `column_id`
+  (table id + normalized unique SQL column name). Schema fingerprints and positions are deliberately separate from identity,
+  so adding/reordering columns does not rewrite the identities of unchanged columns. In AI-facing output these are shortened
+  to handles (`t3`, `t3.c7`) with a legend.
 * Trust labels on every derived fact: `detected | config | inferred | confirmed`, plus `method` and `score` (0-1).
 * **Evidence object** `{run_id, source_id, sheet, table, xl_row, xl_col, rule_id, pack}`; fields not applicable are omitted.
 * Severity: `info | warn | error`. An `error` finding blocks promotion only if the project config says so.
@@ -47,7 +49,7 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_dictionary` | term, meaning, aliases[], unit, applies_to (column_id patterns), status, origin (`pack|config|auto`) |
 | `_rule_results` | rule_id, pack, pack_version, status (`pass|fail|error|skipped`), expected, actual, tolerance, evidence |
 | `_kpi_results` | kpi_id, value, unit, dims, definition_ref, evidence |
-| `_changes` | kind (`schema|volume|value|category|kpi|source`), severity, subject, before, after, evidence |
+| `_changes` | kind (`schema|volume|value|row|category|distribution|kpi|source|baseline`), severity, subject, before, after, evidence |
 
 ## 4. Run manifest [phase 1] `manifest.json`
 
