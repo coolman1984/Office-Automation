@@ -141,7 +141,10 @@ def extract_sheet(sess, idx, con, res, opts, budget):
         log("WARN", f"  {gen} blank header(s) -> col_N")
     if dup:
         log("WARN", f"  {dup} duplicate header(s) renamed with a numeric suffix")
-    res.header_cells = sum(1 for h in headers if h is not None)
+    # Only headers of KEPT columns are actually represented anywhere (as column names). A header cell whose column
+    # was dropped (e.g. whitespace/symbols-only text with no data) must not be credited as "stored", or the
+    # whole-sheet completeness check below would silently pass over genuinely lost data.
+    res.header_cells = sum(1 for c in keep if headers[c] is not None)
     plans = [ColPlan(n, fc + c, headers[c], stats[c], opts.strict) for n, c in zip(names, keep)]
     if total_rows:
         detect_dates(sess, idx, plans, data_first, lr, opts.strict)

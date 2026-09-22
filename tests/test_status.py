@@ -1,11 +1,10 @@
 """Status tests: fast metadata mode and deep SHA-256 verification."""
-import datetime as dt
 import os
 import tempfile
 import unittest
 
 from xl2ai.core.config import load_config
-from xl2ai.core.fsutil import sha256_file
+from xl2ai.core.fsutil import format_mtime, sha256_file
 from xl2ai.core.runs import Run
 from xl2ai.status import compute_status
 
@@ -24,7 +23,7 @@ class TestStatus(unittest.TestCase):
             st=os.stat(source)
             run=Run.create(cfg)
             run.m["inputs"]=[{"source_id":"s","path":source,"size":st.st_size,
-                              "mtime":dt.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                              "mtime":format_mtime(st.st_mtime),
                               "sha256":digest,"hash_mode":mode}]
             with run.stage("sources"):
                 pass

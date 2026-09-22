@@ -61,23 +61,34 @@ def _envelope(tool, columns, rows, started, cfg, evidence=None, total_rows=None,
     return out
 
 
-def _cap_values(rows, cfg):
+def _cap_values(rows, cfg, row_limit=None):
+    limit=cfg.ai["query_rows"] if row_limit is None else row_limit
     kept=[]
     truncated=False
     for row in rows:
         candidate=kept+[list(row)]
         size=len(json.dumps(candidate,ensure_ascii=False,default=str).encode())
-        if len(candidate)>cfg.ai["query_rows"] or size>cfg.ai["query_bytes"]:
+        if len(candidate)>limit or size>cfg.ai["query_bytes"]:
             truncated=True
             break
         kept=candidate
     return kept,truncated
 
 
-def _cap_rows(cur, cfg):
+def _cap_rows(cur, cfg, row_limit=None):
     columns=[d[0] for d in cur.description or []]
-    rows,truncated=_cap_values(cur,cfg)
+    rows,truncated=_cap_values(cur,cfg,row_limit)
     return columns,rows,truncated
+
+
+def _run_capped(src, sql_text, params, cfg, row_limit=None):
+    """Execute a query built by this module and cap it, turning any SQLite failure into a normal Xl2aiError
+    envelope instead of an uncaught traceback (the tools are meant to fail cleanly for an AI/CLI caller)."""
+    try:
+        cur=src.execute(sql_text,params)
+        return _cap_rows(cur,cfg,row_limit)
+    except sqlite3.DatabaseError as e:
+        raise Xl2aiError("E_STAGE_INPUT",f"query failed: {e}") from None
 
 
 def schema(cfg, run_id=None):
@@ -123,8 +134,7 @@ def sample(cfg, selector, limit=None, run_id=None):
         tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
     lim=max(1,min(int(limit or cfg.ai["query_rows"]),cfg.ai["query_rows"]))
     with _source_db(run_dir,db_rel) as src:
-        cur=src.execute(f"SELECT * FROM {q(table)} LIMIT ?",(lim+1,))
-        columns,rows,truncated=_cap_rows(cur,cfg)
+        columns,rows,truncated=_run_capped(src,f"SELECT * FROM {q(table)} LIMIT ?",(lim+1,),cfg,row_limit=lim)
     return _envelope("sample",columns,rows,started,cfg,evidence=[{"run_id":rid,"source_id":sid,"sheet":sheet,"table_id":tid}],
                      truncated=truncated)
 
@@ -135,6 +145,8 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
     op=op.lower()
     if op not in {"count","sum","avg","min","max"}:
         raise Xl2aiError("E_NOT_ALLOWED",f"aggregate not allowed: {op}")
+    if column=="*" and op!="count":
+        raise Xl2aiError("E_STAGE_INPUT",f"op '{op}' needs a real column, not '*'","use --op count, or name a column")
     with _catalog(catp) as cat:
         tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
         names={r[0] for r in cat.execute("SELECT name FROM _columns WHERE table_id=?",(tid,))}
@@ -147,8 +159,7 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
     sql_text=(f"SELECT {q(group_by)}, {expr} AS value FROM {q(table)} GROUP BY {q(group_by)} "
               f"ORDER BY value DESC LIMIT {cfg.ai['query_rows']+1}") if group_by else f"SELECT {expr} AS value FROM {q(table)}"
     with _source_db(run_dir,db_rel) as src:
-        cur=src.execute(sql_text)
-        columns,rows,truncated=_cap_rows(cur,cfg)
+        columns,rows,truncated=_run_capped(src,sql_text,(),cfg)
     return _envelope("aggregate",columns,rows,started,cfg,evidence=[{"run_id":rid,"source_id":sid,"table_id":tid}],
                      truncated=truncated)
 
@@ -240,8 +251,7 @@ def trace(cfg, selector, xl_row, run_id=None):
     with _catalog(catp) as cat:
         tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
     with _source_db(run_dir,db_rel) as src:
-        cur=src.execute(f"SELECT * FROM {q(table)} WHERE _xl_row=? LIMIT 2",(int(xl_row),))
-        columns,rows,truncated=_cap_rows(cur,cfg)
+        columns,rows,truncated=_run_capped(src,f"SELECT * FROM {q(table)} WHERE _xl_row=? LIMIT 2",(int(xl_row),),cfg)
     return _envelope("trace",columns,rows,started,cfg,
                      evidence=[{"run_id":rid,"source_id":sid,"sheet":sheet,"table_id":tid,"xl_row":int(xl_row)}],
                      truncated=truncated)
@@ -322,6 +332,9 @@ def main(argv=None):
             out=sql(cfg,args.source_id,args.statement,args.run)
     except Xl2aiError as e:
         _print({"ok":False,"error":e.as_dict()})
+        return 1
+    except sqlite3.DatabaseError as e:
+        _print({"ok":False,"error":Xl2aiError("E_STAGE_INPUT",f"query failed: {e}").as_dict()})
         return 1
     _print(out)
     return 0

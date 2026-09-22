@@ -49,8 +49,11 @@ def _row_fingerprint(src, table_name, row_count, max_rows):
         return None, "omitted", None
     counts = Counter()
     cur = src.execute(f"SELECT * FROM {q(table_name)}")
+    # The Excel row tracker is always named "_xl_row" and always first (see extract/sheet.py); detect it by
+    # name, never by the value's type -- an ordinary integer business column in that position looks the same.
+    skip_first = bool(cur.description) and cur.description[0][0] == "_xl_row"
     for row in cur:
-        business = row[1:] if row and isinstance(row[0], int) else row
+        business = row[1:] if skip_first else row
         rh = hashlib.sha256(_json([_value(v) for v in business]).encode("utf-8", "surrogatepass")).hexdigest()
         counts[rh] += 1
     h = hashlib.sha256()
@@ -64,21 +67,21 @@ def _row_fingerprint(src, table_name, row_count, max_rows):
 
 def _column_profile(src, table_name, name, sql_type, kind, row_count, top_k, sample_values):
     col = q(name)
-    n, distinct_count = src.execute(
-        f"SELECT COUNT({col}), COUNT(DISTINCT {col}) FROM {q(table_name)}"
+    tbl = q(table_name)
+    # COUNT/COUNT DISTINCT/MIN/MAX/AVG in one pass instead of up to three separate full-column scans; SQL
+    # aggregates already ignore NULLs, so no WHERE clause is needed here.
+    want_mean = str(sql_type).upper() in ("INTEGER", "REAL") and kind not in ("date", "datetime", "time")
+    mean_expr = f"AVG({col})" if want_mean else "NULL"
+    n, distinct_count, mn, mx, mean = src.execute(
+        f"SELECT COUNT({col}), COUNT(DISTINCT {col}), MIN({col}), MAX({col}), {mean_expr} FROM {tbl}"
     ).fetchone()
     nulls = max(0, int(row_count) - int(n or 0))
-    mn = mx = mean = None
-    if n:
-        mn, mx = src.execute(f"SELECT MIN({col}), MAX({col}) FROM {q(table_name)} WHERE {col} IS NOT NULL").fetchone()
-        if str(sql_type).upper() in ("INTEGER", "REAL") and kind not in ("date", "datetime", "time"):
-            mean = src.execute(f"SELECT AVG({col}) FROM {q(table_name)} WHERE {col} IS NOT NULL").fetchone()[0]
     top = src.execute(
-        f"SELECT {col}, COUNT(*) c FROM {q(table_name)} WHERE {col} IS NOT NULL "
+        f"SELECT {col}, COUNT(*) c FROM {tbl} WHERE {col} IS NOT NULL "
         f"GROUP BY {col} ORDER BY c DESC, {col} LIMIT ?", (top_k,)
     ).fetchall()
     sample = src.execute(
-        f"SELECT DISTINCT {col} FROM {q(table_name)} WHERE {col} IS NOT NULL LIMIT ?", (sample_values,)
+        f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL LIMIT ?", (sample_values,)
     ).fetchall()
     return {
         "n": int(n or 0), "nulls": nulls, "distinct": int(distinct_count or 0),

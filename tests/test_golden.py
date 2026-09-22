@@ -14,9 +14,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
-import fixture_cache  # noqa: E402
-import regression_dump  # noqa: E402
 from xl2ai.extract.pipeline import main  # noqa: E402
+
+# fixture_cache -> make_fixtures needs real Excel COM (pythoncom/pywin32) to build synthetic workbooks; importing
+# it on a machine without them must not abort test discovery for the whole `tests/` package, only skip this module.
+try:
+    import fixture_cache  # noqa: E402
+    import regression_dump  # noqa: E402
+    _FIXTURES_ERROR = None
+except ImportError as e:
+    fixture_cache = regression_dump = None
+    _FIXTURES_ERROR = str(e)
 
 GOLDEN = os.path.join(HERE, "golden", "fingerprints.json")
 SPECIMEN_DIR = os.path.join(ROOT, "Price Comparison Data")
@@ -28,6 +36,7 @@ def extract(src, out_dir):
     return code, db
 
 
+@unittest.skipIf(_FIXTURES_ERROR, f"synthetic-fixture tests need Windows + Excel (pywin32): {_FIXTURES_ERROR}")
 class TestGolden(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

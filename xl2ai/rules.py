@@ -227,19 +227,20 @@ def _resolve_sql(sql, tables):
     return out.rstrip(";")
 
 
-def _query_connection(run_dir, dbs, timeout_s):
+def _query_connection(run_dir, dbs):
     con = sqlite3.connect(":memory:", uri=True)
     for db_rel, alias in dbs.items():
         uri = f"file:{os.path.abspath(os.path.join(run_dir, db_rel.replace('/', os.sep)))}?mode=ro"
         con.execute(f"ATTACH DATABASE ? AS {q(alias)}", (uri,))
     con.execute("PRAGMA query_only=ON")
     install_readonly_authorizer(con)
-    deadline = time.monotonic() + timeout_s
-    con.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 2000)
     return con
 
 
-def _scalar(con, sql):
+def _scalar(con, sql, timeout_s):
+    """Give this one query its own fresh deadline, so an earlier slow rule never starves a later fast one."""
+    deadline = time.monotonic() + timeout_s
+    con.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 2000)
     row = con.execute(sql).fetchone()
     return None if row is None else row[0]
 
@@ -282,7 +283,8 @@ def run_packs(cfg, run_id, catalog_path=None):
                                (term, meaning, json.dumps(item.get("aliases", []), ensure_ascii=False, separators=(",", ":")),
                                 str(item.get("unit", "")), str(item.get("applies_to", "")),
                                 str(item.get("status", "confirmed")), "pack", pack["name"], pack["version"]))
-            qc = _query_connection(run_dir, dbs, cfg.ai["query_timeout"])
+            timeout_s = cfg.ai["query_timeout"]
+            qc = _query_connection(run_dir, dbs)
             try:
                 for item in pack["rules"]:
                     rid = str(item.get("id", "")).strip()
@@ -293,7 +295,7 @@ def run_packs(cfg, run_id, catalog_path=None):
                     message = str(item.get("message", ""))
                     try:
                         sql = _resolve_sql(item.get("sql"), tables)
-                        actual = _scalar(qc, sql)
+                        actual = _scalar(qc, sql, timeout_s)
                         ok = _expect(actual, expected)
                         status = "pass" if ok else "fail"
                         evidence = json.dumps({"sql": sql}, ensure_ascii=False, separators=(",", ":"))
@@ -310,13 +312,21 @@ def run_packs(cfg, run_id, catalog_path=None):
                     kid = str(item.get("id", "")).strip()
                     if not kid:
                         raise Xl2aiError("E_RULE", f"{pack['file']}: KPI missing id")
-                    sql = _resolve_sql(item.get("sql"), tables)
-                    value = _scalar(qc, sql)
-                    writer.execute("INSERT OR REPLACE INTO _kpi_results VALUES (?,?,?,?,?,?,?,?)",
-                                   (kid, pack["name"], pack["version"], None if value is None else str(value),
-                                    str(item.get("unit", "")), json.dumps(item.get("dims", {}), separators=(",", ":")),
-                                    os.path.basename(pack["file"]),
-                                    json.dumps({"sql": sql}, ensure_ascii=False, separators=(",", ":"))))
+                    try:
+                        sql = _resolve_sql(item.get("sql"), tables)
+                        value = _scalar(qc, sql, timeout_s)
+                        writer.execute("INSERT OR REPLACE INTO _kpi_results VALUES (?,?,?,?,?,?,?,?)",
+                                       (kid, pack["name"], pack["version"], None if value is None else str(value),
+                                        str(item.get("unit", "")), json.dumps(item.get("dims", {}), separators=(",", ":")),
+                                        os.path.basename(pack["file"]),
+                                        json.dumps({"sql": sql}, ensure_ascii=False, separators=(",", ":"))))
+                    except Exception as e:
+                        # No status column on _kpi_results: surface the failure through _rule_results instead,
+                        # the same place stage_rules already looks to decide whether the run may be promoted.
+                        err = e.message if isinstance(e, Xl2aiError) else f"{type(e).__name__}: {e}"
+                        writer.execute("INSERT OR REPLACE INTO _rule_results VALUES (?,?,?,?,?,?,?,?,?)",
+                                       (f"kpi:{kid}", pack["name"], pack["version"], "error", "", err,
+                                        "error", f"KPI '{kid}' could not be computed", "{}"))
             finally:
                 qc.close()
         writer.commit()

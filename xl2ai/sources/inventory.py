@@ -7,7 +7,6 @@ replaces it (useful when a file is moved).
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import glob
 import hashlib
 import json
@@ -16,7 +15,7 @@ import sys
 
 from ..core.config import load_config
 from ..core.errors import Xl2aiError
-from ..core.fsutil import sha256_file, slug
+from ..core.fsutil import format_mtime, sha256_file, slug
 from .detect import sniff_file
 
 EXTENSIONS = ("xlsx", "xlsm", "xlsb", "xls")
@@ -71,7 +70,7 @@ def build_inventory(cfg):
             sniffed = sniff_file(f, cfg.wrapper_prefixes)
             wrapper = "none" if sniffed == "zip" else sniffed
             sources.append({"source_id": source_id(f, spec.alias), "path": f, "kind": kind_of(f), "size": st.st_size,
-                            "mtime": dt.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                            "mtime": format_mtime(st.st_mtime),
                             "sha256": digest, "hash_mode": mode, "wrapper": wrapper})
     if missing:
         raise Xl2aiError("E_SRC_MISSING", "no file matches: " + "; ".join(missing),

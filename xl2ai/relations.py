@@ -13,7 +13,6 @@ import sys
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.runs import current_run_id
-from .core.sqliteutil import ro_connection
 
 
 def q(name):
@@ -58,22 +57,37 @@ def infer_relations(cfg, run_id, catalog_path=None):
     if not os.path.isfile(path):
         raise Xl2aiError("E_STAGE_INPUT", "catalog not found", "run catalog/analyze first")
     con = sqlite3.connect(path)
+    src_cache = {}
+
+    def source(db_rel):
+        p = os.path.join(run_dir, db_rel.replace("/", os.sep))
+        if p not in src_cache:
+            src_cache[p] = sqlite3.connect(f"file:{os.path.abspath(p)}?mode=ro", uri=True)
+        return src_cache[p]
+
     try:
-        con.execute("DELETE FROM _relationships")
+        # Only clear previously INFERRED relationships. Pack-confirmed relationships (written by the rules stage,
+        # which now runs before this one) are human knowledge and must survive a re-run of inference.
+        con.execute("DELETE FROM _relationships WHERE status='inferred'")
         cols = con.execute("""SELECT c.column_id,c.table_id,c.name,c.sql_type,c.kind,t.table_name,t.db_rel,
                                      COALESCE(p.distinct_count,0),t.row_count
                               FROM _columns c JOIN _tables t ON t.table_id=c.table_id
                               LEFT JOIN _profile_columns p ON p.column_id=c.column_id
                               ORDER BY c.column_id""").fetchall()
         by_id = {r[0]: r for r in cols}
+        # A human-confirmed key is fully trusted regardless of its measured uniqueness (which may be NULL: packs
+        # apply before any profiling of that exact column pair existed). A generic inferred key still needs a
+        # near-perfect uniqueness score before it is trusted as a relationship target.
         key_rows = con.execute(
-            "SELECT table_id,columns_json,uniqueness FROM _keys WHERE status='inferred' AND uniqueness>=0.98"
+            "SELECT table_id,columns_json,uniqueness,status FROM _keys "
+            "WHERE status='confirmed' OR (status='inferred' AND uniqueness>=0.98)"
         ).fetchall()
         parents = []
-        for table_id, columns_json, uniqueness in key_rows:
+        for table_id, columns_json, uniqueness, status in key_rows:
             ids = json.loads(columns_json)
             if len(ids) == 1 and ids[0] in by_id:
-                parents.append((by_id[ids[0]], float(uniqueness)))
+                trust = 1.0 if status == "confirmed" else float(uniqueness)
+                parents.append((by_id[ids[0]], trust))
         for child in cols:
             child_id, child_table_id, child_name, child_type, child_kind, child_table, child_db, child_distinct, child_rows = child
             min_domain = 3 if int(child_rows or 0) < 50 else 5
@@ -90,13 +104,11 @@ def infer_relations(cfg, run_id, catalog_path=None):
                 name_score = 1.0 if nf == np and nf else difflib.SequenceMatcher(None, nf, np).ratio()
                 if name_score < 0.82:
                     continue
-                child_path = os.path.join(run_dir, child_db.replace("/", os.sep))
-                parent_path = os.path.join(run_dir, parent_db.replace("/", os.sep))
-                with ro_connection(child_path) as cs, ro_connection(parent_path) as ps:
-                    vals = _sample_values(cs, child_table, child_name, cfg.analysis["relation_sample"])
-                    if len(vals) < min_domain:
-                        continue
-                    match = _matched(ps, parent_table, parent_name, vals)
+                cs, ps = source(child_db), source(parent_db)
+                vals = _sample_values(cs, child_table, child_name, cfg.analysis["relation_sample"])
+                if len(vals) < min_domain:
+                    continue
+                match = _matched(ps, parent_table, parent_name, vals)
                 containment = match / len(vals)
                 if containment < 0.90:
                     continue
@@ -104,11 +116,15 @@ def infer_relations(cfg, run_id, catalog_path=None):
                 rid = hashlib.sha1(f"{child_id}|{parent_id}".encode()).hexdigest()[:20]
                 evidence = json.dumps({"sampled": len(vals), "matched": match, "name_score": round(name_score,4)},
                                       separators=(",", ":"))
-                con.execute("INSERT INTO _relationships VALUES (?,?,?,?,?,?,?,?,?)",
+                # OR IGNORE: a pack may already have confirmed this exact column pair (same id); the confirmed
+                # row always wins and is never overwritten by a freshly inferred guess.
+                con.execute("INSERT OR IGNORE INTO _relationships VALUES (?,?,?,?,?,?,?,?,?)",
                             (rid, child_id, parent_id, "inclusion", containment, "inferred",
                              "key_name_containment", score, evidence))
         con.commit()
     finally:
+        for c in src_cache.values():
+            c.close()
         con.close()
     return path
 

@@ -50,6 +50,8 @@ def pid_alive(pid):
         try:
             os.kill(int(pid), 0)
             return True
+        except PermissionError:
+            return True                                    # the process exists; we just may not signal it
         except (OSError, ValueError, TypeError):
             return False
     h = _k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, int(pid))

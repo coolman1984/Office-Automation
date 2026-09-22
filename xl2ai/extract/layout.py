@@ -56,6 +56,11 @@ def find_extent(ws):
     corner = ws.Cells(ws.Rows.Count, ws.Columns.Count)
     first_row = find(XL_BYROWS, XL_NEXT, corner)
     first_col = find(XL_BYCOLS, XL_NEXT, corner)
+    # All four searches scan the same non-empty-cell universe, just in different directions, so if one found
+    # something the others should too -- but never trust a live COM call that far: a None here would otherwise
+    # crash on .Row/.Column below instead of being treated as "no usable extent", same as the check above.
+    if last_col is None or first_row is None or first_col is None:
+        return None
     return first_row.Row, first_col.Column, last_row.Row, last_col.Column
 
 

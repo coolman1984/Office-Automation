@@ -6,14 +6,13 @@ Cheap by design (no Excel, no hashing): freshness compares size and modified tim
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import os
 import sys
 
 from .core.config import load_config
 from .core.errors import Xl2aiError
-from .core.fsutil import sha256_file
+from .core.fsutil import format_mtime, sha256_file
 from .core.runs import current_run_id, list_runs, load_manifest
 
 
@@ -38,7 +37,7 @@ def compute_status(cfg, deep=False):
         except OSError:
             out["changes"].append({"path": inp["path"], "reason": "missing"})
             continue
-        mtime = dt.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")
+        mtime = format_mtime(st.st_mtime)
         stat_changed = st.st_size != inp["size"] or mtime != inp["mtime"]
         if stat_changed:
             out["changes"].append({"path": inp["path"], "reason": "modified"})

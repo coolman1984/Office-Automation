@@ -45,7 +45,7 @@ class Lock:
             return None
 
     def _stale(self, info):
-        if info is None:                                  # unreadable: a writer may be mid-create, so give it time
+        if not isinstance(info, dict):                    # unreadable/empty: a writer may be mid-create, give it time
             try:
                 return time.time() - os.path.getmtime(self.path) > 60
             except OSError:
@@ -68,6 +68,9 @@ class Lock:
                     except OSError:
                         pass
                     continue
+                if not isinstance(info, dict):             # not stale yet, but unreadable: a writer is mid-create
+                    raise Xl2aiError("E_LOCKED", "another refresh appears to be starting (lock file is being written)",
+                                     "wait a moment and retry; never delete a lock while its owner process is alive") from None
                 age = time.time() - float(info.get("epoch", time.time()))
                 limit = self.cfg.lock_stale_hours * 3600
                 old_note = ""
