@@ -21,6 +21,12 @@ python -m unittest tests.test_golden                 # byte-level regression onl
 | `test_rules_changes.py` | packs, KPIs, confirmations and run-to-run changes |
 | `test_context_query.py` | context budget, query caps, read-only SQL and evidence |
 | `test_platform_e2e.py` | cross-stage compatibility from extraction DB through report/context/query |
+| `test_brief.py` | `xl2ai brief`'s readiness verdict, gaps and exit codes (no Excel) |
+| `test_blind_spots.py` | Power Query/Data Model/external-link/stale-calc/chart detection surfaced through catalog, context pack and `brief` (no Excel) |
+| `test_structural_truth.py` | header-confidence scoring (pure function), totals-row detection, table-kind classification (no Excel) |
+| `test_semantics.py` | column-role/unit classification (pure functions), table grain, time coverage, auto-drafted definitions, cross-file duplicate detection (no Excel) |
+| `test_repair.py` | opt-in repair suggestions never touch the extracted table; `query repaired` applies them only in the response (no Excel) |
+| `test_agent_brief.py` | `ai/agent_brief.md` combines readiness, changes-explained, roles and grain by plain name (no Excel) |
 
 Fixtures: `tests/make_fixtures.py` builds them with Excel (`fixture_cache.py` shares one build per test run).
 Case list and coverage status: `EDGE_CASES.md`.
@@ -39,3 +45,9 @@ Case list and coverage status: `EDGE_CASES.md`.
 
 * Excel on this machine wraps every saved file in DRM; saving/launching is slower and timings vary with machine load.
 * Performance numbers are recorded, not asserted tightly (the 200k-row test only asserts < 120 s).
+* **Outstanding as of the agent-readiness phases (`AGENT_READINESS_PLAN.md`)**: `_extraction_log` gained columns
+  (`header_confidence`, `header_reasons`) and the extraction database gained tables (`_unsupported`, `_formulas`)
+  in an environment without Windows/Excel/COM available, so `test_golden.py` could not be run there (it is
+  skipped whenever `pywin32` is unavailable) and the goldens were not regenerated. Run
+  `python tests/regen_golden.py` on a Windows machine with Excel before treating those two changes as fully
+  validated; `test_golden.py` will fail on its next real run until that happens.
