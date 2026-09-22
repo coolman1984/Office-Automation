@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 0.4.0 - Observability: live run view and failure diagnosis (2026-09-22)
+
+* Added `xl2ai watch`: refreshes with a live, step-by-step terminal view built on a new dependency-free `xl2ai/ui/`
+  toolkit (capability detection, colour/glyph fallbacks, display-width-aware tables/panels/trees/bars/spinners,
+  flicker-free live region). `--demo` simulates a run so the interface is visible and testable without Excel.
+* Added `xl2ai diagnose`: explains a finished run from its event journal, surfacing the first real failure (not its
+  downstream symptoms) and the events around it; `--ai` prints that as plain text to paste into an AI assistant.
+* Added `xl2ai/observe/`: an event vocabulary, a bus whose subscribers can never break the pipeline, and a JSON
+  Lines journal (`data/runs/<run_id>/journal.jsonl`) written by every run and readable even after a killed process.
+* Fixed extraction on non-Windows machines failing with an unrelated `AttributeError` instead of reporting plainly
+  that Excel and pywin32 are required.
+* Fixed rules/KPIs sharing one SQL deadline per pack, letting an earlier slow rule starve or fail later fast ones
+  and abort the whole run; each rule/KPI now gets its own deadline and KPI failures are caught and surfaced rather
+  than aborting the stage.
+* Fixed a lock-acquisition crash when another process's lock file is mid-write, and a `pid_alive()` case where
+  "permission denied" was treated as "process is dead" (could let two refreshes hold the lock at once).
+* Fixed uncaught tracebacks from SQLite errors in query `aggregate`/`trace`/`sample`, now returned as the documented
+  `{ok:false, error}` envelope; `sample()` no longer returns one row more than `--limit`.
+* Fixed context-pack building being O(n^2) (300 tables: 5.7s -> 0.04s) by tracking token cost incrementally.
+* Fixed row fingerprinting detecting the Excel row-position column by value-type guessing, which could silently
+  strip a real integer business column; it is now detected by name (`_xl_row`).
+* Fixed relation inference always running before rule-pack keys/relationships were applied, and never using
+  confirmed keys as parent candidates; rules now run first, and inference preserves confirmed relationships while
+  treating confirmed keys as fully trusted.
+* Fixed source-freshness comparison using a local-time string, which could make every source look modified across a
+  timezone/DST change; now compared as UTC mtime.
+* 36 new tests; full suite 167 pass (138 run by default, 29 skipped without Windows/Excel).
+
 ## 0.3.0 - AI-ready platform completion/hardening (2026-09-21)
 
 * Added run catalog with source/sheet/name-based stable identities; schema/type/position drift is tracked separately.

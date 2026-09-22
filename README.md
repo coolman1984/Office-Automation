@@ -28,6 +28,7 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Fast status and optional deep SHA-256 source-integrity check.
 - Human-readable project report and environment doctor.
 - Installable package and `xl2ai` command.
+- Live, step-by-step run view (`xl2ai watch`) and post-run failure diagnosis (`xl2ai diagnose`), both usable without Excel via `--demo`.
 
 ## Install
 
@@ -74,9 +75,13 @@ xl2ai query sample <table-id>
 xl2ai query aggregate <table-id> amount --op sum --group-by department
 xl2ai query compare
 xl2ai query trace <table-id> 25
+xl2ai watch
+xl2ai diagnose
 ```
 
 `status` is deliberately fast and checks file size + modified time. `status --deep` recomputes full SHA-256 when you need the stronger guarantee.
+
+`watch` runs a refresh with a live, redraw-free terminal view of each stage as it happens; add `--demo` to see it without Excel or a real project. `diagnose` explains a finished run afterwards: what stage it reached, the first real failure (not its downstream symptoms) and the events around it; `--ai` prints that as plain text ready to paste into an AI assistant. Every run writes `data/runs/<run_id>/journal.jsonl`, which `diagnose` reads.
 
 ## Trust model
 
