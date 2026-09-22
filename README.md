@@ -96,6 +96,24 @@ xl2ai diagnose
 
 `watch` runs a refresh with a live, redraw-free terminal view of each stage as it happens; add `--demo` to see it without Excel or a real project. `diagnose` explains a finished run afterwards: what stage it reached, the first real failure (not its downstream symptoms) and the events around it; `--ai` prints that as plain text ready to paste into an AI assistant. Every run writes `data/runs/<run_id>/journal.jsonl`, which `diagnose` reads.
 
+## Keeping data fresh
+
+`xl2ai` does not run as a background service; schedule `xl2ai refresh` with whatever the host already has (cron,
+a systemd timer, Windows Task Scheduler). A minimal cron line:
+
+```
+0 * * * * cd /path/to/project && xl2ai refresh >> refresh.log 2>&1
+```
+
+After any refresh (scheduled or manual), check readiness before trusting the result:
+
+```powershell
+xl2ai brief          # exit 0 = ready, 1 = usable but read the gaps, 2 = do not use this data
+```
+
+`xl2ai brief`'s exit code is meant to be checked by scripts, not just read by humans -- a scheduled job or an
+agent can refuse to proceed on stale, unpromoted or failed data instead of silently using it.
+
 ## Trust model
 
 The platform keeps four ideas separate:
@@ -144,7 +162,7 @@ Still incomplete:
 - multi-row/complex headers with explicit region configuration,
 - full formula dependency capture,
 - pivot definition/source logic,
-- Power Query / Data Model semantics,
+- Power Query / Data Model *semantics* (their presence is detected and reported as a blind spot; their internal logic is not read),
 - key-based row-level before/after values for confirmed keys,
 - a graphical UI.
 
@@ -178,3 +196,4 @@ The CI matrix runs the COM-free platform tests on Windows and Linux with Python 
 - `BUSINESS_RULES.md` rule-pack format.
 - `EXTENDING.md` how to add a new project/capability.
 - `CHANGELOG.md` shipped changes.
+- `AGENT_READINESS_PLAN.md` the phased plan behind `brief`/`agent_brief`/`semantics`/`repair` and what remains.

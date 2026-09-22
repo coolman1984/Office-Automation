@@ -133,6 +133,12 @@ def stage_contextpack(run, st, cfg, ctx):
     st.detail("hash", payload["hash"])
 
 
+def stage_agent_brief(run, st, cfg, ctx):
+    from .agent_brief import build_agent_brief
+    path = build_agent_brief(cfg, run.id, ctx.get("catalog"))
+    st.artifact(path)
+
+
 def stage_changes(run, st, cfg, ctx):
     from .changes import detect_changes
     path = detect_changes(cfg, run.id, catalog_path=ctx.get("catalog"))
@@ -266,7 +272,8 @@ def stage_extract(run, st, cfg, ctx):
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
           ("analyze", stage_analyze), ("semantics", stage_semantics), ("repair", stage_repair),
           ("rules", stage_rules), ("relations", stage_relations), ("changes", stage_changes),
-          ("audit", stage_audit), ("contextpack", stage_contextpack), ("report", stage_report))
+          ("audit", stage_audit), ("contextpack", stage_contextpack), ("agent_brief", stage_agent_brief),
+          ("report", stage_report))
 # rules runs before relations: pack-confirmed keys must exist in `_keys` before relation inference can use them
 # as trusted parent candidates (see relations.infer_relations), not just generic uniqueness-inferred ones.
 

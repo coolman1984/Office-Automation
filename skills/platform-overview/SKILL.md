@@ -29,6 +29,8 @@ exist yet — check `ARCHITECTURE.md` roadmap and `AGENT_READINESS_PLAN.md` befo
 - `extract` — Excel workbook -> verified SQLite, one database per workbook, byte-for-byte checked against Excel
 - `catalog` — stable table/column identities for a run
 - `analyze` — column profiling, generic data-quality findings, candidate keys, row fingerprints
+- `semantics` — column roles, units/currency, table grain, time coverage, auto-drafted definitions
+- `repair` — opt-in, reversible cleanup suggestions (never applied in place; see `query repaired`)
 - `relations` — conservative inferred relationships between tables (inclusion + name similarity)
 - `rules` — deterministic business rules and KPIs from human-authored packs
 - `changes` — run-to-run diff: schema, volume, values, categories, distributions, KPIs, row multisets
@@ -36,7 +38,7 @@ exist yet — check `ARCHITECTURE.md` roadmap and `AGENT_READINESS_PLAN.md` befo
 - `query` — read-only, capped tools: `schema describe sample aggregate meta compare trace sql`
 - `refresh` — runs every stage above into a new run, promotes it only if it earned it
 - `watch` / `diagnose` — live progress view and post-run failure diagnosis
-- `status` / `report` / `doctor` / `audit` / `brief` — health, freshness and orientation
+- `status` / `report` / `doctor` / `audit` / `brief` / `agent-brief` — health, freshness and orientation
 
 ## Rules (all agents)
 

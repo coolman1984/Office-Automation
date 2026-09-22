@@ -115,11 +115,19 @@ Read in tiers; stop at the first tier that answers the question.
 
 | Tier | Artifact / tool | Size target | Purpose |
 |---|---|---|---|
+| -1 | `xl2ai brief` / `ai/agent_brief.md` | one call / one read | cold-start orientation: readiness, gaps, changes explained in plain language, tables by name with roles/grain, next commands |
 | 0 | `ai/context_pack.md` (+ `.json`) | <= 4k tokens (configurable, test-enforced) | orientation: sources+freshness, tables (grouped), relationships, definitions, KPIs, changes, warnings |
 | 1 | `xl2ai describe <table>` / `ai/profiles/<table>.json` | <= 1.5k tokens | one table: columns, types, stats, samples, quality, keys |
 | 2 | `xl2ai query sample|slice|aggregate|compare` | default <= 50 rows / 8 KB | targeted evidence |
 | 3 | `xl2ai sql "SELECT ..."` | same caps, read-only | anything else |
 | - | `xl2ai trace <table> <row>` | tiny | source workbook/sheet/cell/formula/run for any row |
+
+`brief`/`agent_brief.md` and `context_pack.md` serve different moments, not different agents: `brief` is a single
+bounded call for "is this safe to use and where do I start", read once at the start of a session; `context_pack.md`
+uses short handles (`t3.c7`) because it may be reread every turn of a long session, where every token spent on
+verbose names is a token not spent on the actual question. Reach for `agent_brief.md` when clarity matters more
+than size (a first read, a human skimming alongside the agent); reach for `context_pack.md` once oriented and
+optimizing for a long session's token budget.
 
 Token-saving techniques: short stable handles (`t3`, `t3.c7`) with a legend; **schema families** (identical
 column sets collapse into one entry + list of tables); column groups (`col_1..col_40`); domains as top-k with
@@ -137,6 +145,31 @@ The built pack format is TOML: one `pack.toml` can define confirmed terms, keys,
 KPIs. Packs are loaded only from paths declared in project config. Results carry pack/version evidence. Python
 calculator plugins and automatic applies-when selectors remain optional future extensions; they are not silently
 treated as built.
+
+## 5.5. Agent access: CLI first, decided (not just deferred)
+
+Section 7 has said "tools are CLI first, an MCP wrapper is optional later" since before any agent-readiness work
+existed. That default is now a decision, not a placeholder, based on: an MCP server pays a context cost on every
+call for its tool schemas, while a CLI process pays nothing until it is actually invoked; the CLI's tool
+responses are already the strict, capped, evidence-bearing JSON envelope an MCP tool would need to expose anyway;
+and this platform's one hard requirement -- an agent must never open the source workbook itself -- is enforced by
+the CLI process boundary regardless of what calls it. Build an MCP (or any other) wrapper only when a specific
+host cannot spawn a process; it should be a thin envelope-preserving shim over these same commands, never a
+second implementation of the rules in `AI_USAGE.md`.
+
+## 5.6. Freshness and the readiness gate
+
+A stale `ai/context_pack.md` is more dangerous than none: an agent trusts it completely and has no way to tell it
+is outdated. Two things make freshness a checked property rather than a hope:
+
+- **Scheduling is external, deliberately.** This is an offline-first CLI tool, not a daemon; running `xl2ai
+  refresh` on a schedule is the job of the host's own scheduler (cron, systemd timer, Windows Task Scheduler),
+  pointed at the project's `xl2ai.toml`. Building a scheduler into the platform would mean owning process
+  supervision, logging and failure alerting that the OS already does better.
+- **The readiness gate makes staleness loud.** `xl2ai brief` (and `ai/agent_brief.md`, written every run) is not
+  merely informative: its exit code (0 ready, 1 needs review, 2 not ready -- stale, unpromoted or failed) is
+  designed to be checked by whatever calls it, including a scheduled job's own script, so an agent or automation
+  can refuse to proceed on data it has not verified is current rather than silently using it.
 
 ## 6. Roadmap with regression gates
 

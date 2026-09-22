@@ -36,20 +36,22 @@ future agent. That is the measure of success for this plan — not feature count
 
 Each step is what a competent agent would do. `Gap` is what forces it to open Excel, guess, or burn tokens.
 
-| # | Agent's question | Available today | Gap |
+Status as of phases 1-6 landing (see `CHANGELOG.md` 0.5.0-0.9.0 and the version after this note):
+
+| # | Agent's question | Available today | Gap closed by |
 |---|---|---|---|
-| 1 | "What am I looking at?" | `skills/` folder is the documented entry point | **[missing]** `skills/platform-overview` still says stages after `extract` are "planned … do not invent it". Every stage it names as missing has shipped. An agent that obeys this skill will bypass the whole platform and read Excel itself. **This single file defeats the project's purpose.** |
-| 2 | "Which files, how fresh, any duplicates?" | `sources` inventory: path, size, mtime, SHA-256 **[built]** | **[missing]** no duplicate detection (same content, two names), no stale/live classification, no importance ordering |
-| 3 | "What's in each file?" | `_extraction_log`: per-sheet status, rows, header row, error cells **[built]** | **[missing]** no sheet *kind* classification (data table / formatted report / notes / config / dashboard). Agent cannot tell a real table from a printed report |
-| 4 | "Where does the table start and end?" | one table per sheet, single header row, preamble preserved **[partial]** | **[missing]** several tables per sheet, multi-row/hierarchical headers, transposed tables, side-by-side blocks. Published research names this the dominant real-world failure mode |
-| 5 | "What does this column mean?" | name, SQL type, kind, stats, top-k, samples **[built]** | **[missing]** semantic role (identifier / date / money / quantity / ratio / category / code / free text), unit, currency. Agent must guess from the header string |
-| 6 | "What is one row?" (grain) | nothing | **[missing]** No grain detection at all. Without it an agent cannot know whether `SUM(amount)` is correct or double-counts. **Highest-risk silent error in the whole system.** |
-| 7 | "Are there traps in the rows?" | blank rows skipped; `DQ_*` findings for nulls, constants, mixed types, null tokens, Excel errors, merged cells, formulas, pivots **[built]** | **[missing]** totals/subtotal row detection. An agent that sums a column containing a totals row silently doubles the answer |
-| 8 | "How do tables relate?" | inclusion/name inference with containment + score, confirmed vs inferred **[built]** | **[partial]** no cross-file "same table, newer copy" detection |
-| 9 | "What couldn't you read?" | formulas/pivots/merged flagged as quality findings **[partial]** | **[missing]** Power Query, Data Model, external links, linked data types are not detected or reported. The agent believes it saw everything. **Silent, confident blindness.** |
-| 10 | "How much do I trust this?" | four trust labels; `_verification` proves stored == Excel (COUNTA/SUM) **[built]** | **[missing]** no per-table readiness verdict combining verification, structure confidence, and quality into one signal an agent can branch on |
-| 11 | "Where do I start reading?" | `ai/context_pack.md` + `.json`, token-budgeted, deterministic **[built]** | **[partial]** written in handles (`t3.c7`) for compactness, with no question→tool playbook and no statement of what the pack deliberately omits in *agent* terms |
-| 12 | "Is this still true?" | incremental refresh reuses unchanged sources **[built]** | **[missing]** nothing scheduled. A stale pack is worse than no pack: the agent trusts it completely |
+| 1 | "What am I looking at?" | `skills/agent-start` -> `xl2ai brief` **[built, phase 1]** | Fixed: `skills/platform-overview` no longer misdescribes the platform as unbuilt; `skills/agent-start` and `skills/query-playbook` added |
+| 2 | "Which files, how fresh, any duplicates?" | `sources` inventory **[built]**; cross-file duplicate/version detection **[built, phase 4]** (`_duplicate_candidates`, schema fingerprint + row-hash overlap) | Remaining: stale/live classification, importance ordering -- not attempted |
+| 3 | "What's in each file?" | `_extraction_log` **[built]**; sheet/table *kind* classification **[built, phase 3]** (`_table_kind`: data/notes/report/dashboard/empty, always inferred) | Closed for the cases the heuristic covers; no ML-level classification attempted |
+| 4 | "Where does the table start and end?" | one table per sheet, single header row, preamble preserved **[partial]**; header **confidence + reasons** added **[built, phase 3]** | **Still open**: several tables per sheet, multi-row/hierarchical headers, transposed tables. See phase 3 note below -- deliberately not attempted without a Windows+Excel environment to validate against real messy workbooks |
+| 5 | "What does this column mean?" | semantic role classification **[built, phase 4]** (`_column_roles`: identifier/date/money/quantity/percentage/category/code/boolean/free_text/geo/contact, name-based unit/currency) | Closed for name/type/uniqueness-based inference; value-format-based unit detection remains planned |
+| 6 | "What is one row?" (grain) | table grain detection **[built, phase 4]** (`_table_grain`: description from the strongest key, or explicitly `unknown`) | Closed: an unclear grain is now stated, never guessed |
+| 7 | "Are there traps in the rows?" | `DQ_*` findings **[built]**; totals/subtotal-row detection **[built, phase 3]** (`_row_flags`, label-based) | Closed for label-matched totals rows; value-sum-matching remains planned (higher false-positive risk) |
+| 8 | "How do tables relate?" | relationship inference **[built]**; cross-file duplicate detection **[built, phase 4]** | Closed (see #2) |
+| 9 | "What couldn't you read?" | Power Query / Data Model / external-link / stale-calculation / chart detection **[built, phase 2]** (`_unsupported`, surfaced as `blind_spots`) | Closed for these five kinds; linked data types (Rich Data Types) remain undetected |
+| 10 | "How much do I trust this?" | per-table readiness verdict **[built, phase 1]** (`xl2ai brief`: ready/needs_review/not_ready, combining verification + quality + blind spots + totals rows) | Closed |
+| 11 | "Where do I start reading?" | `ai/context_pack.md` (handles, token-budgeted) **[built]**; `ai/agent_brief.md` (plain names, grain, roles, changes explained) **[built, phase 6]**; `skills/query-playbook` (question -> tool map) **[built, phase 1]** | Closed |
+| 12 | "Is this still true?" | `xl2ai brief`'s exit code as a checkable readiness gate **[built, phase 1]**; scheduling documented as an external cron/Task-Scheduler responsibility **[built, phase 6]** | Closed within this platform's scope (it does not run as a daemon by design; see ARCHITECTURE.md §5.6) |
 
 ---
 
@@ -253,3 +255,27 @@ Phase 1 is hours of work and unblocks the entire premise; it should ship before 
 and removes the most dangerous class of error (confident blindness). Phase 3 is the largest engineering effort in
 the plan and should not start until 1 and 2 are done, because it is the phase most likely to consume a whole
 session's budget on its own.
+
+## 8. Status after phases 1-6 (this session)
+
+Phases 1, 2, 4, 5 and 6 shipped in full within this session's scope (`brief`/`agent_brief`, honest blind-spot
+detection, the semantic layer, opt-in repairs, freshness/readiness documentation) -- see `CHANGELOG.md` 0.5.0
+through the version after this note, each with tests that run without Excel.
+
+**Phase 3 shipped partially, by design.** What is safe to build and verify without a Windows+Excel environment
+landed: header-detection confidence scoring, label-based totals-row detection, and table-kind classification --
+all pure logic over already-extracted values, all with passing tests. What did **not** ship: region detection
+(several tables per sheet), multi-row/hierarchical header reconstruction, and transposed-table detection. These
+three change the extraction identity model itself (today: one table per sheet, one header row) and touch live
+Excel COM code (`extract/layout.py`, `extract/sheet.py`) that this environment cannot run or validate against a
+real messy workbook. Shipping an unvalidated guess at that layer risks silently corrupting exactly the structural
+truth this phase exists to protect -- worse than leaving the gap open and documented (which `EDGE_CASES.md` does).
+
+**Also flagged, not resolved here**: two schema changes (phase 2's `_unsupported`/`_formulas`, phase 3's
+`_extraction_log` columns) mean `tests/golden/fingerprints.json` needs regenerating with
+`python tests/regen_golden.py` on a Windows machine with Excel -- noted in `CHANGELOG.md` for both phases and
+still outstanding as of this note.
+
+**Recommended next step** for whoever has that environment: pick up region detection/multi-row headers using the
+synthetic-fixture approach in `tests/make_fixtures.py` (already the project's pattern for exactly this kind of
+COM-dependent, must-validate-for-real feature), then regenerate the goldens in the same pass.

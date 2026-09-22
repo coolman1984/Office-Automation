@@ -21,11 +21,14 @@ STAGE_PURPOSE = {
     "extract": "read Excel into verified SQLite",
     "catalog": "give every table and column a stable identity",
     "analyze": "profile columns, flag quality issues, infer keys",
+    "semantics": "infer column roles, table grain, time coverage and draft definitions",
+    "repair": "suggest opt-in cleanup fixes, applied to nothing but _repairs",
     "rules": "apply pack knowledge, rules and KPIs",
     "relations": "infer relationships between tables",
     "changes": "compare against the previous trusted run",
     "audit": "verify the run's artifacts agree with each other",
     "contextpack": "build the compact AI context pack",
+    "agent_brief": "write the plain-language agent brief",
     "report": "write the human-readable summary",
 }
 

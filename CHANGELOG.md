@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 0.10.0 - Agent readiness, phase 6: the agent interface and staying fresh (2026-09-22)
+
+* Added `ai/agent_brief.md` (new `agent_brief` stage, `xl2ai agent-brief` standalone command): one plain-language
+  file combining `brief`'s readiness verdict, the change log explained in plain words ("why it matters" per
+  change kind), every table by its real name with its grain and column roles spelled out, and confirmed/drafted
+  definitions and KPIs -- what would otherwise take five separate calls to assemble. Deliberately not a
+  replacement for the compact, handle-based `ai/context_pack.md`: the two serve different moments (see
+  `ARCHITECTURE.md` §4).
+* Documented the CLI-vs-MCP access decision as final, not deferred (`ARCHITECTURE.md` §5.5): an MCP server pays a
+  context cost on every call for its tool schemas, a CLI process pays nothing until invoked, and the CLI's
+  responses are already the envelope an MCP tool would need anyway. Build a wrapper only where a host cannot
+  spawn a process.
+* Documented freshness and the readiness gate (`ARCHITECTURE.md` §5.6, `README.md`): scheduling `xl2ai refresh`
+  is an external cron/systemd-timer/Task-Scheduler responsibility by design (this is not a daemon); `xl2ai
+  brief`'s exit code is meant to be checked by whatever calls it (including a scheduled job's own script) so
+  stale, unpromoted or failed data is refused rather than silently used. The readiness-gate mechanism itself
+  shipped in phase 1 (0.5.0); this phase documents and completes its intended use.
+
 ## 0.9.0 - Agent readiness, phase 5: opt-in reversible repairs (2026-09-22)
 
 **No output change when `[repair].enabled` is left at its default (`false`)**: the new `repair` stage runs, finds

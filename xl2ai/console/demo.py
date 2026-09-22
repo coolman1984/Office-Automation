@@ -33,11 +33,14 @@ STAGES = [
     ("extract", {"sources": 3, "reused": 1}),
     ("catalog", {"tables": 8}),
     ("analyze", {"quality_findings": 14, "candidate_keys": 5}),
+    ("semantics", {"roles_classified": 22, "tables_with_unknown_grain": 1, "duplicate_candidates": 0}),
+    ("repair", {"repair_suggestions": 0}),
     ("rules", {"failed_rules": 1, "rule_errors": 0}),
     ("relations", {"relationships": 3}),
     ("changes", {"changes": 27}),
     ("audit", {"checks": 46, "issues": 0}),
     ("contextpack", {"est_tokens": 3820}),
+    ("agent_brief", {}),
     ("report", {}),
 ]
 

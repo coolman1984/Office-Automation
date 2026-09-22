@@ -47,6 +47,10 @@ Typical next steps:
 - A specific number → `xl2ai query aggregate` / `sample` / `sql`, then `xl2ai query trace` to prove where it came from.
 - "What changed?" → `xl2ai query compare`.
 
+If `ai/agent_brief.md` exists for the current run, it already combines `brief`'s readiness verdict with the
+change log explained in plain language, every table's grain and column roles by name, and confirmed/drafted
+definitions -- often enough on its own to skip several of the calls below entirely.
+
 See `skills/query-playbook` for the full question -> tool map.
 
 ## The one failure mode to avoid
