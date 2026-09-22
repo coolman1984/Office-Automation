@@ -27,7 +27,14 @@ CREATE TABLE _sources (
 CREATE TABLE _tables (
   table_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, sheet_name TEXT NOT NULL, table_name TEXT NOT NULL,
   db_rel TEXT NOT NULL, row_count INTEGER NOT NULL, column_count INTEGER NOT NULL, header_row INTEGER,
-  visibility TEXT, schema_fingerprint TEXT NOT NULL
+  visibility TEXT, schema_fingerprint TEXT NOT NULL, header_confidence REAL, header_reasons TEXT
+);
+CREATE TABLE _table_kind (
+  table_id TEXT PRIMARY KEY, kind TEXT NOT NULL, confidence REAL, method TEXT, reasons TEXT
+);
+CREATE TABLE _row_flags (
+  table_id TEXT NOT NULL, xl_row INTEGER NOT NULL, flag TEXT NOT NULL, detail TEXT,
+  PRIMARY KEY(table_id, xl_row, flag)
 );
 CREATE TABLE _columns (
   column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT NOT NULL,
@@ -148,12 +155,17 @@ def build_catalog(cfg, run_id, manifest=None):
             with ro_connection(srcdb) as src:
                 src_tables = {r[0] for r in src.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-                logs = src.execute("""SELECT sheet_name, table_name, data_rows, columns, header_row, visibility
+                log_cols = {r[1] for r in src.execute("PRAGMA table_info(_extraction_log)").fetchall()}
+                has_header_conf = {"header_confidence", "header_reasons"} <= log_cols
+                extra = ", header_confidence, header_reasons" if has_header_conf else ""
+                logs = src.execute(f"""SELECT sheet_name, table_name, data_rows, columns, header_row, visibility{extra}
                                       FROM _extraction_log
                                       WHERE status='extracted' AND table_name IS NOT NULL
                                       ORDER BY sheet_index""").fetchall()
                 sheet_to_table = {}
-                for sheet_name, table_name, rows, ncols, header_row, visibility in logs:
+                for log_row in logs:
+                    sheet_name, table_name, rows, ncols, header_row, visibility = log_row[:6]
+                    hdr_conf, hdr_reasons = log_row[6:8] if has_header_conf else (None, None)
                     col_rows = src.execute("""SELECT position, sql_name, original_header, xl_col, xl_col_letter,
                                                      sql_type, kind, non_null, error_cells
                                               FROM _columns WHERE table_name=? ORDER BY position""", (table_name,)).fetchall()
@@ -163,9 +175,9 @@ def build_catalog(cfg, run_id, manifest=None):
                     fp = _schema_fingerprint(cols)
                     table_id = _table_id(sid, sheet_name)
                     sheet_to_table[sheet_name] = table_id
-                    con.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    con.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                 (table_id, sid, sheet_name, table_name, rec["db"], int(rows or 0), int(ncols or len(cols)),
-                                 header_row, visibility, fp))
+                                 header_row, visibility, fp, hdr_conf, hdr_reasons))
                     col_ids = {}
                     for c in cols:
                         column_id = _column_id(table_id, c["sql_name"])

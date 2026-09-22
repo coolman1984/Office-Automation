@@ -21,6 +21,46 @@ def find_header(block, width):
     return None
 
 
+def header_confidence(block, width, header_row):
+    """(score in [0,1], [reason,...]) for the header row this run chose (or None: no header detected).
+
+    Pure function of already-read values, so an agent's trust in a table's column names has a number and a
+    reason attached instead of a silent guess -- and it is unit-testable with no COM involved.
+    """
+    if header_row is None:
+        return 0.0, ["no header row found in the first rows scanned; columns were named generically"]
+    row = block[header_row]
+    vals = [v for v in row if v is not None and v != ""]
+    if not vals:
+        return 0.0, ["chosen header row is empty"]
+    reasons, score = [], 0.0
+
+    filled_ratio = len(vals) / max(1, width)
+    score += 0.4 * min(1.0, filled_ratio)
+    reasons.append(f"{len(vals)}/{width} columns have a header value")
+
+    strs = [v.strip().lower() for v in vals if type(v) is str]
+    text_ratio = len(strs) / max(1, len(vals))
+    score += 0.3 * text_ratio
+    reasons.append(f"{len(strs)}/{len(vals)} header values are text")
+
+    uniq_ratio = len(set(strs)) / max(1, len(strs)) if strs else 0.0
+    score += 0.2 * uniq_ratio
+    if uniq_ratio < 1.0:
+        reasons.append("some header labels repeat (may be a grouped/hierarchical header)")
+
+    has_next_data = header_row + 1 < len(block) and any(v is not None for v in block[header_row + 1])
+    if has_next_data:
+        score += 0.1
+    else:
+        reasons.append("no data row immediately follows the chosen header")
+
+    if header_row > 0:
+        reasons.append(f"{header_row} row(s) above the header were kept as preamble")
+
+    return round(min(1.0, score), 3), reasons
+
+
 def show_filtered_rows(ws):
     """Un-filter the sheet in Excel's in-memory copy; returns True if a filter was active.
 

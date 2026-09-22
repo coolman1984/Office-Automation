@@ -1,6 +1,37 @@
 # CHANGELOG
 
+## 0.7.0 - Agent readiness, phase 3: structural truth (2026-09-22)
+
+**Extraction database schema change**: `_extraction_log` gained `header_confidence`/`header_reasons` columns.
+Golden fingerprints (`tests/golden/fingerprints.json`) must be regenerated with `python tests/regen_golden.py` on
+a Windows machine with Excel before this change is considered fully validated -- that could not be run in this
+environment (no Excel/COM available here). `test_golden.py` will fail on a real Windows+Excel run until then;
+it is currently skipped wherever pywin32 is unavailable, so this was not caught by this environment's test run.
+
+* Added header-detection confidence scoring (`xl2ai/extract/layout.py:header_confidence`): a score in [0,1] plus
+  plain-language reasons (columns filled, text ratio, repeated/grouped labels, whether data follows), computed as
+  a pure function of already-read cell values so it is unit-testable without Excel. Carried through
+  `_extraction_log` into the catalog's `_tables.header_confidence`/`header_reasons`.
+* Added totals/subtotal-row detection (`_row_flags`, flag `totals_candidate`): rows whose text column reads as a
+  totals label ("Total", "Grand Total", "Subtotal", "إجمالي", "المجموع", ...) are flagged by `_xl_row`, with a new
+  `DQ_TOTALS_ROW_IN_DATA` quality finding -- a default aggregate over such a table would otherwise double-count them.
+* Added table-kind classification (`_table_kind`): `data | notes | report | dashboard | empty`, a small explicit
+  rule set over signals already computed (row/column count, header presence, formula density, pivot presence,
+  totals rows), always `inferred` with a method and reasons, never presented as confirmed.
+* `xl2ai query meta table_kind` / `row_flags` expose both directly. The context pack's `tables[]` entries gained
+  `kind`. `xl2ai brief` downgrades a table with an unresolved totals row from `ready` to `needs_review` and lists
+  it under `gaps`.
+* Documented (`EDGE_CASES.md`) that full region detection (several tables per sheet), multi-row/hierarchical
+  headers and transposed-table reconstruction remain out of scope for this phase -- they change the extraction
+  identity model itself and need validation against real, messy workbooks on Windows+Excel, which this
+  environment cannot provide. See `AGENT_READINESS_PLAN.md` phase 3 for the reasoning and what remains.
+
 ## 0.6.0 - Agent readiness, phase 2: honest gaps (2026-09-22)
+
+**Extraction database schema change**: new `_unsupported` and `_formulas` tables in both the per-workbook
+extraction database and the run catalog. Golden fingerprints must be regenerated with `python tests/regen_golden.py`
+on a Windows machine with Excel before this change is fully validated -- see the note on this in 0.7.0 below,
+which applies equally here; both phases landed in the same session with no Excel/COM environment available.
 
 * Added detection of content this platform cannot fully read, so a run reports it instead of silently treating
   the workbook as fully understood: Power Query steps, the Excel Data Model, external workbook links (workbook

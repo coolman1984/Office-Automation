@@ -18,6 +18,9 @@ from .core.sqliteutil import ro_connection
 
 NULL_TOKENS = ("n/a", "na", "null", "none", "-", "--", "nil", "(blank)", "blank")
 
+TOTALS_LABELS = ("total", "totals", "grand total", "subtotal", "sub-total", "sum", "net total",
+                 "إجمالي", "الإجمالي", "المجموع", "مجموع", "الاجمالي", "اجمالي")
+
 
 def q(name):
     return '"' + str(name).replace('"', '""') + '"'
@@ -90,6 +93,53 @@ def _column_profile(src, table_name, name, sql_type, kind, row_count, top_k, sam
     }
 
 
+def _detect_totals_rows(src, table_name, text_columns, max_rows):
+    """[(xl_row, label)] for rows whose first_row-order matching text column reads as a totals/subtotal label.
+
+    Label-based only (not value-matching a column sum): a coincidental partial sum is a common false positive,
+    while "total"/"grand total"/"إجمالي" in a text cell is a strong, low-noise signal a human would also use.
+    Bounded by max_rows for the same reason row-hashing is: a full scan on a huge table is not worth its cost here.
+    """
+    if not text_columns:
+        return []
+    tbl = q(table_name)
+    found = {}
+    for col in text_columns:
+        marks = ",".join("?" * len(TOTALS_LABELS))
+        rows = src.execute(
+            f"SELECT _xl_row, {q(col)} FROM {tbl} WHERE LOWER(TRIM(CAST({q(col)} AS TEXT))) IN ({marks}) "
+            f"LIMIT ?", (*TOTALS_LABELS, max_rows)
+        ).fetchall()
+        for xl_row, val in rows:
+            found.setdefault(xl_row, str(val))
+    return sorted(found.items())
+
+
+def _classify_table_kind(row_count, column_count, header_row, formula_ratio, pivot_tables, has_totals_rows):
+    """(kind, confidence, method, [reason,...]) -- always `inferred`, never presented as confirmed.
+
+    A deliberately small, explicit rule set over signals the platform already computed, not a model call: an
+    agent can see exactly why a table was classified a given way and override it via config if wrong.
+    """
+    reasons = []
+    if row_count == 0:
+        return "empty", 1.0, "heuristic", ["no data rows"]
+    if header_row is None and row_count <= 20 and column_count <= 4:
+        reasons.append(f"no header detected and small ({row_count} rows x {column_count} cols)")
+        return "notes", 0.6, "heuristic", reasons
+    if pivot_tables:
+        reasons.append(f"{pivot_tables} pivot table(s) present on this sheet")
+        return "dashboard", 0.6, "heuristic", reasons
+    if formula_ratio is not None and formula_ratio >= 0.3:
+        reasons.append(f"{formula_ratio:.0%} of cells carry formulas")
+        return "report", 0.5, "heuristic", reasons
+    if has_totals_rows and row_count <= 50:
+        reasons.append("small table containing a totals/subtotal row and little else")
+        return "report", 0.4, "heuristic", reasons
+    reasons.append(f"{row_count} data row(s), header detected, low formula density")
+    return "data", 0.7 if header_row is not None else 0.4, "heuristic", reasons
+
+
 def _add_finding(con, code, severity, table_id, column_id, count, examples, message):
     subject = column_id or table_id
     con.execute("INSERT OR REPLACE INTO _dq_findings VALUES (?,?,?,?,?,?,?,?)",
@@ -110,6 +160,8 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
         con.execute("DELETE FROM _row_hashes")
         con.execute("DELETE FROM _dq_findings")
         con.execute("DELETE FROM _keys")
+        con.execute("DELETE FROM _table_kind")
+        con.execute("DELETE FROM _row_flags")
         tables = con.execute("""SELECT table_id,table_name,db_rel,row_count,header_row,column_count
                                 FROM _tables ORDER BY table_id""").fetchall()
         for table_id, table_name, db_rel, row_count, header_row, column_count in tables:
@@ -123,20 +175,23 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                                  "very wide table; inspect whether several logical regions were flattened together")
                 log_cols = {r[1] for r in src.execute("PRAGMA table_info(_extraction_log)").fetchall()}
                 wanted = {"formula_cells", "pivot_tables", "merged_in_data"}
+                formulas = pivots = merged = 0
                 if wanted.issubset(log_cols):
                     x = src.execute("""SELECT formula_cells,pivot_tables,merged_in_data
                                        FROM _extraction_log WHERE table_name=? LIMIT 1""", (table_name,)).fetchone()
                     if x:
-                        formulas, pivots, merged = x
-                        if int(formulas or 0):
-                            _add_finding(con, "DQ_FORMULAS_VALUE_ONLY", "warn", table_id, None, int(formulas), [],
+                        formulas, pivots, merged = (int(v or 0) for v in x)
+                        if formulas:
+                            _add_finding(con, "DQ_FORMULAS_VALUE_ONLY", "warn", table_id, None, formulas, [],
                                          "formula results were extracted as values; formula logic is not yet represented in the catalog")
-                        if int(pivots or 0):
-                            _add_finding(con, "DQ_PIVOT_OUTPUT_ONLY", "warn", table_id, None, int(pivots), [],
+                        if pivots:
+                            _add_finding(con, "DQ_PIVOT_OUTPUT_ONLY", "warn", table_id, None, pivots, [],
                                          "pivot output was extracted; pivot definition/source logic is not yet represented")
-                        if int(merged or 0):
+                        if merged:
                             _add_finding(con, "DQ_MERGED_IN_DATA", "warn", table_id, None, 1, [],
                                          "merged cells exist inside the data region; only top-left cells carry values")
+                total_cells = int(row_count or 0) * int(column_count or 0)
+                formula_ratio = (formulas / total_cells) if total_cells else None
                 row_fp, row_mode, row_hashes = _row_fingerprint(
                     src, table_name, int(row_count), cfg.analysis["row_hash_max_rows"])
                 con.execute("INSERT INTO _table_profiles VALUES (?,?,?,?)",
@@ -147,6 +202,7 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                 cols = con.execute("""SELECT column_id,name,sql_type,kind,non_null,error_cells,original_header
                                       FROM _columns WHERE table_id=? ORDER BY position""", (table_id,)).fetchall()
                 candidate_cols = []
+                text_columns = [c[1] for c in cols if c[3] == "text"]
                 generated_headers = sum(1 for c in cols if c[6] is None)
                 if cols and generated_headers / len(cols) >= 0.5:
                     _add_finding(con, "DQ_HEADER_LOW_CONFIDENCE", "warn", table_id, None, generated_headers, [],
@@ -226,6 +282,21 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                         else:
                             continue
                         break
+
+                totals_rows = _detect_totals_rows(src, table_name, text_columns, cfg.analysis["row_hash_max_rows"])
+                for xl_row, label in totals_rows:
+                    con.execute("INSERT OR REPLACE INTO _row_flags VALUES (?,?,?,?)",
+                                (table_id, int(xl_row), "totals_candidate", label))
+                if totals_rows:
+                    _add_finding(con, "DQ_TOTALS_ROW_IN_DATA", "warn", table_id, None, len(totals_rows),
+                                 [label for _, label in totals_rows[:3]],
+                                 "row(s) labelled as a total/subtotal were found inside the data; a default "
+                                 "aggregate over this table will double-count them unless excluded by _xl_row")
+
+                kind, kind_conf, kind_method, kind_reasons = _classify_table_kind(
+                    int(row_count), int(column_count or 0), header_row, formula_ratio, pivots, bool(totals_rows))
+                con.execute("INSERT INTO _table_kind VALUES (?,?,?,?,?)",
+                            (table_id, kind, kind_conf, kind_method, _json(kind_reasons)))
         con.commit()
     finally:
         con.close()

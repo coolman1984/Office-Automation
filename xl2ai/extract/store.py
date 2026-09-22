@@ -11,7 +11,8 @@ CREATE TABLE _extraction_log (id INTEGER PRIMARY KEY, sheet_index INTEGER, sheet
   visibility TEXT, status TEXT, message TEXT, header_row INTEGER, first_row INTEGER, last_row INTEGER,
   first_col INTEGER, last_col INTEGER, data_rows INTEGER, columns INTEGER, blank_rows_skipped INTEGER,
   error_cells INTEGER, formula_cells INTEGER, pivot_tables INTEGER, filter_active INTEGER, merged_areas INTEGER,
-  merged_in_data INTEGER, read_sec REAL, write_sec REAL, total_sec REAL);
+  merged_in_data INTEGER, read_sec REAL, write_sec REAL, total_sec REAL,
+  header_confidence REAL, header_reasons TEXT);
 CREATE TABLE _columns (table_name TEXT, position INTEGER, sql_name TEXT, original_header TEXT, xl_col INTEGER,
   xl_col_letter TEXT, sql_type TEXT, kind TEXT, date_format TEXT, non_null INTEGER, error_cells INTEGER);
 CREATE TABLE _cell_errors (table_name TEXT, xl_row INTEGER, xl_col INTEGER, error TEXT);
@@ -44,12 +45,17 @@ def resolve_db_path(src, out):
 
 
 def write_log(con, results):
+    import json
     con.executemany(
         "INSERT INTO _extraction_log (sheet_index, sheet_name, table_name, visibility, status, message, header_row,"
         " first_row, last_row, first_col, last_col, data_rows, columns, blank_rows_skipped, error_cells,"
-        " formula_cells, pivot_tables, filter_active, merged_areas, merged_in_data, read_sec, write_sec, total_sec)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " formula_cells, pivot_tables, filter_active, merged_areas, merged_in_data, read_sec, write_sec, total_sec,"
+        " header_confidence, header_reasons)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(r.sheet_index, r.sheet_name, r.table_name if r.status == "extracted" else None, r.visibility, r.status,
           r.message, r.header_row, r.first_row, r.last_row, r.first_col, r.last_col, r.data_rows, r.columns,
           r.blank_rows_skipped, r.error_cells, r.formula_cells, r.pivot_tables, r.filter_active, r.merged_areas,
-          r.merged_in_data, round(r.read_sec, 3), round(r.write_sec, 3), round(r.total_sec, 3)) for r in results])
+          r.merged_in_data, round(r.read_sec, 3), round(r.write_sec, 3), round(r.total_sec, 3),
+          getattr(r, "header_confidence", None),
+          json.dumps(getattr(r, "header_reasons", None), ensure_ascii=False) if getattr(r, "header_reasons", None) else None)
+         for r in results])

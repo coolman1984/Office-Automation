@@ -50,8 +50,10 @@ def build_brief(cfg, run_id=None):
 
     con = sqlite3.connect(f"file:{os.path.abspath(catalog_path)}?mode=ro", uri=True)
     try:
-        has_unsupported = "_unsupported" in {r[0] for r in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        existing = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        has_unsupported = "_unsupported" in existing
+        has_row_flags = "_row_flags" in existing
+        has_table_kind = "_table_kind" in existing
         for tid, sid, sheet, table_name, rows in con.execute(
             "SELECT table_id,source_id,sheet_name,table_name,row_count FROM _tables ORDER BY table_id"):
             errors = con.execute(
@@ -62,16 +64,26 @@ def build_brief(cfg, run_id=None):
             if has_unsupported:
                 blind_spots = con.execute(
                     "SELECT COUNT(*) FROM _unsupported WHERE table_id=?", (tid,)).fetchone()[0]
+            totals_rows = 0
+            if has_row_flags:
+                totals_rows = con.execute(
+                    "SELECT COUNT(*) FROM _row_flags WHERE table_id=? AND flag='totals_candidate'",
+                    (tid,)).fetchone()[0]
+            kind = None
+            if has_table_kind:
+                row = con.execute("SELECT kind FROM _table_kind WHERE table_id=?", (tid,)).fetchone()
+                kind = row[0] if row else None
             mismatches = verify_mismatches.get(sid, 0)
             if mismatches:
                 readiness = "not_ready"
-            elif errors or blind_spots:
+            elif errors or blind_spots or totals_rows:
                 readiness = "needs_review"
             else:
                 readiness = "ready"
             out["tables"].append({"table_id": tid, "source_id": sid, "sheet": sheet, "table_name": table_name,
-                                   "rows": int(rows), "readiness": readiness, "quality_errors": errors,
-                                   "quality_warnings": warnings, "blind_spots": blind_spots,
+                                   "rows": int(rows), "kind": kind, "readiness": readiness,
+                                   "quality_errors": errors, "quality_warnings": warnings,
+                                   "blind_spots": blind_spots, "totals_rows": totals_rows,
                                    "verify_mismatches": mismatches})
 
         rule_errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
@@ -103,6 +115,10 @@ def build_brief(cfg, run_id=None):
         if t["quality_errors"]:
             out["gaps"].append({"kind": "quality_error", "table_id": t["table_id"],
                                 "message": f"{t['quality_errors']} error-severity quality finding(s)"})
+        if t["totals_rows"]:
+            out["gaps"].append({"kind": "totals_row_in_data", "table_id": t["table_id"],
+                                "message": f"{t['totals_rows']} totals/subtotal row(s) inside the data; exclude "
+                                           "them explicitly before summing (see query meta row_flags)"})
 
     out["changes_since_previous"] = changes
     out["next_commands"] = ["xl2ai query schema"]
@@ -130,8 +146,11 @@ def _render(out):
             flags.append(f"{t['quality_errors']} error(s)")
         if t["blind_spots"]:
             flags.append(f"{t['blind_spots']} blind spot(s)")
+        if t["totals_rows"]:
+            flags.append(f"{t['totals_rows']} totals row(s)")
         flag_text = f" [{', '.join(flags)}]" if flags else ""
-        lines.append(f"  {t['readiness']:<12} {t['table_id']:<40} {t['rows']:>10,} rows{flag_text}")
+        kind_text = f" ({t['kind']})" if t.get("kind") else ""
+        lines.append(f"  {t['readiness']:<12} {t['table_id']:<40}{kind_text} {t['rows']:>10,} rows{flag_text}")
     if out["gaps"]:
         lines.append("gaps:")
         for g in out["gaps"]:

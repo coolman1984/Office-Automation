@@ -164,7 +164,8 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
                      truncated=truncated)
 
 
-META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported"}
+META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported",
+                 "table_kind", "row_flags"}
 
 
 def meta(cfg, section, run_id=None):
@@ -201,6 +202,12 @@ def meta(cfg, section, run_id=None):
         elif section=="unsupported":
             cur=cat.execute("""SELECT scope,source_id,table_id,kind,count,detail
                                FROM _unsupported ORDER BY scope,kind""")
+        elif section=="table_kind":
+            cur=cat.execute("""SELECT table_id,kind,confidence,method,reasons
+                               FROM _table_kind ORDER BY table_id""")
+        elif section=="row_flags":
+            cur=cat.execute("""SELECT table_id,xl_row,flag,detail
+                               FROM _row_flags ORDER BY table_id,xl_row""")
         else:
             cur=cat.execute("""SELECT table_id,columns_json,uniqueness,null_rate,status,method,score
                                FROM _keys ORDER BY status DESC,score DESC,id""")
@@ -211,6 +218,7 @@ def meta(cfg, section, run_id=None):
         "kpis":{"dims"},
         "quality":{"examples"},
         "keys":{"columns_json"},
+        "table_kind":{"reasons"},
     }.get(section,set())
     if json_cols:
         indexes={name:i for i,name in enumerate(columns)}

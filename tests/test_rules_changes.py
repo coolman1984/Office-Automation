@@ -53,10 +53,10 @@ to_column="customer_id"
         cat=self.run.path("catalog.db"); c=sqlite3.connect(cat); c.executescript(DDL)
         c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",
                   ("source-a","x","h",1,"t","full","extract/source-a.db",0,None))
-        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
-                  ("t1","source-a","Orders","orders","extract/source-a.db",2,2,1,"visible","fp1"))
-        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
-                  ("t2","source-a","Customers","customers","extract/source-a.db",2,1,1,"visible","fp2"))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("t1","source-a","Orders","orders","extract/source-a.db",2,2,1,"visible","fp1",None,None))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("t2","source-a","Customers","customers","extract/source-a.db",2,1,1,"visible","fp2",None,None))
         c.executemany("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",[
             ("t1.c1","t1",1,"amount","Amount",1,"A","REAL","real",2,0),
             ("t1.c2","t1",2,"customer_id","Customer ID",2,"B","INTEGER","integer",2,0),
@@ -137,7 +137,7 @@ class TestChanges(unittest.TestCase):
     def _cat(self,run,rows,schema,rowfp,kpi,top='[["A",3],["B",2]]',distinct=2):
         p=run.path("catalog.db"); c=sqlite3.connect(p); c.executescript(DDL)
         c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",("s","x","hash"+str(rows),1,"t","full","x.db",0,None))
-        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",("t","s","Sheet1","data","x.db",rows,1,1,"visible",schema))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",("t","s","Sheet1","data","x.db",rows,1,1,"visible",schema,None,None))
         c.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",("t.c1","t",1,"category","Category",1,"A","TEXT","text",rows,0))
         c.execute("INSERT INTO _profile_columns VALUES (?,?,?,?,?,?,?,?,?)",
                   ("t.c1",rows,0,distinct,"A","B",None,top,'["A","B"]'))

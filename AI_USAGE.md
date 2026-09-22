@@ -45,6 +45,8 @@ xl2ai query meta relationships
 xl2ai query meta quality
 xl2ai query meta definitions
 xl2ai query meta unsupported
+xl2ai query meta table_kind
+xl2ai query meta row_flags
 xl2ai query trace <table-id> 25
 ```
 
@@ -73,6 +75,9 @@ When a table has a blind spot (`query meta unsupported`, or `brief`'s `gaps`), m
 question touches that table's numbers -- a workbook whose real logic lives in Power Query or the Data Model can
 have extracted values that no longer match the source. Silence about a known blind spot is treated the same as
 not knowing about it.
+
+Before summing or averaging a column, check `query meta row_flags` for `totals_candidate` rows in that table and
+exclude them by `_xl_row` -- a totals/subtotal row left inside an aggregate silently doubles the answer.
 
 ## Token discipline
 

@@ -2,4 +2,4 @@
 
 The platform package contains no project or domain knowledge; that lives in rule packs (see ARCHITECTURE.md).
 """
-__version__ = "0.6.0"
+__version__ = "0.7.0"

@@ -31,7 +31,8 @@ additive = minor, breaking = major (a major bump requires a migration note in `C
 | `_columns` [built] | table_name, position, sql_name, original_header, xl_col, xl_col_letter, sql_type, kind, date_format, non_null, error_cells |
 | `_cell_errors`, `_sheet_preamble`, `_merged_areas` [built] | as named |
 | `_verification` [built] | table_name, column_name, check_name (`counta|sum|cells_total`), excel_value, sqlite_value, ok (1/0/NULL), note |
-| `_tables` [phase 2] | table_id, sheet, region, header_rows[], header_score, header_reasons, source (`detected|config`), fingerprint |
+| `_tables` extras [built] | `header_confidence` (0-1), `header_reasons` (plain-language list) -- computed from the chosen header row's own values, no COM cost beyond what extraction already reads |
+| `_tables` regions [phase 2] | region, header_rows[] (multi-row/hierarchical), source (`detected|config`) -- one table per sheet remains the identity model until this phase |
 | `_formulas` [built, per-column only] | table_name, sql_name, has_formula, sample_r1c1 (one sample per column; full run-length R1C1 patterns remain phase 3) |
 | `_unsupported` [built] | scope (`workbook`\|`sheet`), sheet_name, kind (`power_query`\|`data_model`\|`external_link`\|`stale_calculation`\|`chart`), count, detail |
 | `_pivots`, `_names` [phase 3] | pivot definitions, defined names (pivot *output* and formula *values* are already extracted; their definitions are not) |
@@ -53,6 +54,8 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_changes` | kind (`schema|volume|value|row|category|distribution|kpi|source|baseline`), severity, subject, before, after, evidence |
 | `_unsupported` [built] | source_id, table_id (NULL for workbook-scope findings), scope, sheet_name, kind, count, detail |
 | `_formulas` [built] | column_id, table_id, has_formula, sample_r1c1 |
+| `_table_kind` [built] | table_id, kind (`data\|notes\|report\|dashboard\|empty`), confidence, method, reasons -- always `inferred` |
+| `_row_flags` [built] | table_id, xl_row, flag (`totals_candidate`), detail -- label-matched, never value-sum-matched |
 
 ## 4. Run manifest [phase 1] `manifest.json`
 

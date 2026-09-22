@@ -9,7 +9,7 @@ from .coltypes import ColPlan, ColStat, clean_surrogates, convert_column
 from .com import ExcelDied
 from .common import ERROR_TEXT, ERR_HI, ERR_LO, HEADER_SCAN_ROWS, XL_FORMULAS, XL_WORKSHEET, log, pywintypes
 from .dates import classify_format, serial_to_iso
-from .layout import find_extent, find_header, find_merged_areas, show_filtered_rows
+from .layout import find_extent, find_header, find_merged_areas, header_confidence, show_filtered_rows
 from .names import build_columns, clean_header, col_letter, q
 
 class SheetResult:
@@ -18,7 +18,8 @@ class SheetResult:
                              status="", message="", header_row=None, first_row=None, last_row=None,
                              first_col=None, last_col=None, data_rows=0, columns=0, blank_rows_skipped=0,
                              error_cells=0, formula_cells=None, pivot_tables=None, filter_active=None,
-                             merged_areas=0, merged_in_data=None, header_cells=0, preamble_cells=0, read_sec=0.0, write_sec=0.0, total_sec=0.0, plans=[], data_first=None)
+                             merged_areas=0, merged_in_data=None, header_cells=0, preamble_cells=0, read_sec=0.0, write_sec=0.0, total_sec=0.0, plans=[], data_first=None,
+                             header_confidence=None, header_reasons=None)
 
 
 def iter_data(blocks, data_first, counters):
@@ -109,6 +110,7 @@ def extract_sheet(sess, idx, con, res, opts, budget):
     hdr = find_header(first_blk, width)
     res.header_row = fr + hdr if hdr is not None else None
     res.data_first = data_first = (fr + hdr + 1) if hdr is not None else fr
+    res.header_confidence, res.header_reasons = header_confidence(first_blk, width, hdr)
 
     # merged cells: values live only in the top-left cell (nothing is filled). List areas in the header region,
     # and just flag the data region (walking every merged area there is far too slow).

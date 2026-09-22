@@ -54,12 +54,13 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | header on row 1 / below title rows / preamble kept | covered [test_preamble_blank_rows_and_totals] |
 | no header (numeric-only data) | covered [test_headerless_sheet] + specimen |
 | duplicate, blank, whitespace, numeric, error-valued headers | covered [test_duplicate_and_blank_headers, TestNaming] |
-| two-level (grouped) headers, e.g. group label above each column pair | planned P2 (today the upper level is kept in the preamble, nothing lost) |
-| several tables on one sheet (side by side / stacked) | planned P2 |
-| blank rows inside data, totals / subtotal rows, trailing notes | covered (blank rows, totals row); subtotal detection planned P4 |
-| header detection confidence + config override | planned P2 |
-| transposed tables (fields in rows) | planned P2 |
+| two-level (grouped) headers, e.g. group label above each column pair | planned P2 (today the upper level is kept in the preamble, nothing lost; header confidence explicitly flags repeated labels as a possible grouped header) |
+| several tables on one sheet (side by side / stacked) | planned P2 -- changes the extraction identity model itself (today: one table per sheet) and needs validation against real messy workbooks on Windows+Excel, not just a heuristic; not attempted this phase for that reason |
+| blank rows inside data, totals / subtotal rows, trailing notes | covered [test_structural_truth.py]: label-based totals/subtotal row detection (`_row_flags`, `DQ_TOTALS_ROW_IN_DATA`); value-sum-matching detection remains planned P4 (higher false-positive risk) |
+| header detection confidence + config override | covered (score + reasons) [test_structural_truth.py:TestHeaderConfidence]; config override remains planned |
+| transposed tables (fields in rows) | planned P2 -- same reasoning as multi-table sheets: a wrong reconstruction is worse than an honest "not detected" |
 | tables that do not start at A1 | covered (specimen, `Phantom`, preamble) |
+| sheet/table kind (data vs. report vs. notes vs. dashboard) | covered [test_structural_truth.py:TestTotalsAndKind], `inferred` only, from row/column count, header presence, formula density, pivots and totals rows |
 
 ## D. Values and types
 

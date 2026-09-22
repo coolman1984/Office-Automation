@@ -32,7 +32,7 @@ class TestContextAndQuery(unittest.TestCase):
         c=sqlite3.connect(cat)
         c.executescript(DDL)
         c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",("s","x","h",3,"2026-01-01","full","extract/s.db",0,None))
-        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",("t1","s","Sheet1","data","extract/s.db",3,2,1,"visible","fp"))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",("t1","s","Sheet1","data","extract/s.db",3,2,1,"visible","fp",None,None))
         c.executemany("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",[
             ("t1.c1","t1",1,"id","ID",1,"A","INTEGER","integer",3,0),
             ("t1.c2","t1",2,"value","Value",2,"B","TEXT","text",3,0)])
@@ -71,8 +71,8 @@ class TestContextAndQuery(unittest.TestCase):
 
     def test_schema_and_describe_obey_query_caps(self):
         c=sqlite3.connect(self.cat)
-        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
-                  ("t2","s","Sheet2","data2","extract/s.db",1,1,1,"visible","fp2"))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("t2","s","Sheet2","data2","extract/s.db",1,1,1,"visible","fp2",None,None))
         c.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                   ("t2.c1","t2",1,"id","ID",1,"A","INTEGER","integer",1,0))
         c.commit()

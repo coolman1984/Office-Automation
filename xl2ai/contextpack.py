@@ -69,7 +69,8 @@ def _render_markdown(p):
     lines += ["", "## Tables"]
     for t in p["tables"]:
         cols = ", ".join(f"{c['h']}={c['name']}:{c['type']}" for c in t.get("columns", []))
-        lines.append(f"- {t['h']} {t['table_id']} | {t['source_id']} / {t['sheet']} | {t['rows']} rows" +
+        kind_tag = f" | kind={t['kind']}" if t.get("kind") else ""
+        lines.append(f"- {t['h']} {t['table_id']} | {t['source_id']} / {t['sheet']} | {t['rows']} rows{kind_tag}" +
                      (f" | {cols}" if cols else ""))
     if p.get("relationships"):
         lines += ["", "## Relationships"]
@@ -134,6 +135,12 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                            "size": int(size or 0), "mtime": mtime,
                            "reused": bool(reused), "tables": int(table_count)}, budget_tokens, omitted, "sources", state)
 
+        has_table_kind = con.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_table_kind'").fetchone()[0]
+        kinds = {}
+        if has_table_kind:
+            kinds = {r[0]: r[1] for r in con.execute("SELECT table_id,kind FROM _table_kind").fetchall()}
+
         table_rows = con.execute("""SELECT table_id,source_id,sheet_name,row_count,column_count
                                     FROM _tables ORDER BY table_id""").fetchall()
         handles = {}
@@ -143,7 +150,7 @@ def build_context_pack(cfg, run_id, catalog_path=None):
             cols = con.execute("""SELECT position,name,sql_type FROM _columns
                                   WHERE table_id=? ORDER BY position""", (tid,)).fetchall()
             item = {"h": h, "table_id": tid, "source_id": sid, "sheet": sheet,
-                    "rows": int(rows), "cols": int(ncols),
+                    "rows": int(rows), "cols": int(ncols), "kind": kinds.get(tid),
                     "columns": [{"h": f"{h}.c{p}", "name": n, "type": typ} for p,n,typ in cols]}
             if not _add_budgeted(payload, "tables", item, budget_tokens, omitted, "tables", state):
                 skinny = dict(item)

@@ -18,7 +18,7 @@ class TestReport(unittest.TestCase):
             cfg=load_config(cfgp); run=Run.create(cfg)
             cat=run.path("catalog.db"); c=sqlite3.connect(cat); c.executescript(DDL)
             c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",("s","x","h",1,"t","full","x.db",0,None))
-            c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",("t","s","S","data","x.db",7,1,1,"visible","fp"))
+            c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",("t","s","S","data","x.db",7,1,1,"visible","fp",None,None))
             c.execute("INSERT INTO _dq_findings VALUES (?,?,?,?,?,?,?,?)",("d","DQ_X","warn","t",None,1,"[]","check me"))
             c.execute("INSERT INTO _kpi_results VALUES (?,?,?,?,?,?,?,?)",("sales","p","1","42","EGP","{}","p","{}"))
             c.commit(); c.close()

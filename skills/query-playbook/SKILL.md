@@ -25,6 +25,8 @@ filter/group-by instead of assuming you saw everything.
 | "What quality problems exist?" | `xl2ai query meta quality` | `DQ_*` codes with severity, subject, message |
 | "Which keys are trustworthy?" | `xl2ai query meta keys` | `status=confirmed` (human-declared) vs `inferred` (score attached) |
 | "What couldn't the platform read?" | `xl2ai query meta unsupported` | Power Query, Data Model, external links, stale-calculation, unread charts -- also summarized in `brief`'s `gaps` |
+| "Is this sheet actually a data table?" | `xl2ai query meta table_kind` | `data\|notes\|report\|dashboard\|empty`, always `inferred` with reasons -- a `report`/`dashboard` sheet may not aggregate the way a plain data table would |
+| "Are there totals rows mixed into the data?" | `xl2ai query meta row_flags` | `_xl_row`-level flags (`totals_candidate`); exclude these rows explicitly before summing a column |
 | "What changed since last time?" | `xl2ai query compare [--kind schema\|volume\|value\|row\|category\|distribution\|kpi]` | already computed; do not recompute by diffing samples yourself |
 | "Where did this row/value come from?" | `xl2ai query trace <table> <xl_row>` | returns the exact Excel row; use this before asserting provenance |
 | "Something not covered above" | `xl2ai query sql <source_id> "SELECT ..."` | single SELECT/WITH only, read-only, capped, authorizer-enforced |

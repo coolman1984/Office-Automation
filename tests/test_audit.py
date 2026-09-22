@@ -36,8 +36,8 @@ class TestAudit(unittest.TestCase):
         c=sqlite3.connect(cat); c.executescript(DDL)
         c.execute("INSERT INTO _sources VALUES (?,?,?,?,?,?,?,?,?)",
                   ("s","x","h",1,"t","full","extract/s.db",0,None))
-        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
-                  ("t","s","S","data","extract/s.db",2,2,1,"visible","fp"))
+        c.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("t","s","S","data","extract/s.db",2,2,1,"visible","fp",None,None))
         c.commit(); c.close()
         self.cat=cat
 
