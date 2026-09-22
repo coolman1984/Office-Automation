@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 0.9.0 - Agent readiness, phase 5: opt-in reversible repairs (2026-09-22)
+
+**No output change when `[repair].enabled` is left at its default (`false`)**: the new `repair` stage runs, finds
+nothing to do, and writes zero rows -- extraction output, catalog content and every existing test are unaffected.
+
+* Added `xl2ai/repair.py`, a new stage between `semantics` and `rules`, gated by `[repair]` in `xl2ai.toml`
+  (`enabled = false` by default). When enabled, it suggests three kinds of fix without ever writing to the
+  extracted database or any data table an agent queries directly:
+  - **null-token normalization**: text values already flagged by `DQ_NULL_TOKEN` ("N/A", "-", "(blank)", ...) get
+    a suggested repair to NULL.
+  - **category spelling consolidation**: whitespace/case variants of the same category value ("Cairo" / "cairo"
+    / " CAIRO ") are mapped onto whichever spelling is most frequent in the table.
+  - **text-as-number coercion**: text that reads as a number once thousands separators are stripped ("1,234")
+    gets a suggested numeric repair; a value that is already a clean number as text is left alone (no no-op
+    suggestions).
+* Every suggestion is a row in `_repairs` (`table_id, column_id, xl_row, original_value, repaired_value, rule`)
+  and nothing else changes: this is a stronger safety property than an undo log, since there is nothing to undo.
+* Added `xl2ai query repaired <table>` to see rows with suggestions applied on the fly, and
+  `xl2ai query meta repairs` to inspect the full suggestion list -- both read-only, both leave the source
+  database untouched.
+
 ## 0.8.0 - Agent readiness, phase 4: the semantic layer (2026-09-22)
 
 **Extraction database schema unchanged** in this phase; only `catalog.db` gained tables (additive, computed

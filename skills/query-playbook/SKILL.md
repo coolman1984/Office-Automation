@@ -31,6 +31,7 @@ filter/group-by instead of assuming you saw everything.
 | "What does one row of this table represent?" | `xl2ai query meta grain` | if `status=unknown`, say so and do not aggregate as if a row's meaning were settled |
 | "What date range does this table cover?" | `xl2ai query meta time_coverage` | min/max per date column |
 | "Is this the same data as another file?" | `xl2ai query meta duplicates` | schema + row-hash-overlap based; a high score means "likely a copy", not proof |
+| "Are there messy values worth cleaning up?" | `xl2ai query meta repairs` / `xl2ai query repaired <table>` | null markers, inconsistent category spelling, text-as-number -- suggestions only, empty unless `[repair].enabled=true`, never applied to the actual data |
 | "What changed since last time?" | `xl2ai query compare [--kind schema\|volume\|value\|row\|category\|distribution\|kpi]` | already computed; do not recompute by diffing samples yourself |
 | "Where did this row/value come from?" | `xl2ai query trace <table> <xl_row>` | returns the exact Excel row; use this before asserting provenance |
 | "Something not covered above" | `xl2ai query sql <source_id> "SELECT ..."` | single SELECT/WITH only, read-only, capped, authorizer-enforced |

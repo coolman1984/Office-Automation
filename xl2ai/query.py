@@ -139,6 +139,46 @@ def sample(cfg, selector, limit=None, run_id=None):
                      truncated=truncated)
 
 
+def repaired(cfg, selector, limit=None, run_id=None):
+    """Same rows as `sample`, but with any `_repairs` suggestions applied in the response only.
+
+    The extracted database is never touched: this reads raw rows and rewrites cells in the returned envelope,
+    strictly by (xl_row, column) match against `_repairs`. Empty when [repair].enabled is false, since no
+    suggestions were ever generated.
+    """
+    started = time.perf_counter()
+    rid, run_dir, catp = _run_paths(cfg, run_id)
+    with _catalog(catp) as cat:
+        tid, sid, sheet, table, db_rel = _resolve_table(cat, selector)
+        col_names = {r[0]: r[1] for r in cat.execute(
+            "SELECT column_id,name FROM _columns WHERE table_id=?", (tid,)).fetchall()}
+        repair_rows = cat.execute(
+            "SELECT column_id,xl_row,repaired_value FROM _repairs WHERE table_id=?", (tid,)).fetchall()
+    lim = max(1, min(int(limit or cfg.ai["query_rows"]), cfg.ai["query_rows"]))
+    with _source_db(run_dir, db_rel) as src:
+        columns, rows, truncated = _run_capped(src, f"SELECT * FROM {q(table)} LIMIT ?", (lim + 1,), cfg, row_limit=lim)
+    repair_map = {}
+    for column_id, xl_row, repaired_value in repair_rows:
+        name = col_names.get(column_id)
+        if name in columns:
+            repair_map[(xl_row, name)] = repaired_value
+    xl_idx = columns.index("_xl_row") if "_xl_row" in columns else None
+    out_rows = []
+    applied = 0
+    for row in rows:
+        row = list(row)
+        if xl_idx is not None:
+            xlr = row[xl_idx]
+            for i, name in enumerate(columns):
+                if (xlr, name) in repair_map:
+                    row[i] = repair_map[(xlr, name)]
+                    applied += 1
+        out_rows.append(row)
+    return _envelope("repaired", columns, out_rows, started, cfg,
+                     evidence=[{"run_id": rid, "source_id": sid, "sheet": sheet, "table_id": tid}],
+                     truncated=truncated, hint=f"{applied} cell(s) shown with a repair applied; raw values unchanged")
+
+
 def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
     started=time.perf_counter()
     rid,run_dir,catp=_run_paths(cfg,run_id)
@@ -165,7 +205,7 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
 
 
 META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported",
-                 "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates"}
+                 "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates", "repairs"}
 
 
 def meta(cfg, section, run_id=None):
@@ -220,6 +260,9 @@ def meta(cfg, section, run_id=None):
         elif section=="duplicates":
             cur=cat.execute("""SELECT table_id_a,table_id_b,method,score,evidence
                                FROM _duplicate_candidates ORDER BY score DESC""")
+        elif section=="repairs":
+            cur=cat.execute("""SELECT table_id,column_id,xl_row,original_value,repaired_value,rule
+                               FROM _repairs ORDER BY table_id,xl_row""")
         else:
             cur=cat.execute("""SELECT table_id,columns_json,uniqueness,null_rate,status,method,score
                                FROM _keys ORDER BY status DESC,score DESC,id""")
@@ -322,6 +365,9 @@ def main(argv=None):
     s=sub.add_parser("sample")
     s.add_argument("table")
     s.add_argument("--limit",type=int)
+    rp=sub.add_parser("repaired")
+    rp.add_argument("table")
+    rp.add_argument("--limit",type=int)
     a=sub.add_parser("aggregate")
     a.add_argument("table")
     a.add_argument("column")
@@ -346,6 +392,8 @@ def main(argv=None):
             out=describe(cfg,args.table,args.run)
         elif args.cmd=="sample":
             out=sample(cfg,args.table,args.limit,args.run)
+        elif args.cmd=="repaired":
+            out=repaired(cfg,args.table,args.limit,args.run)
         elif args.cmd=="aggregate":
             out=aggregate(cfg,args.table,args.column,args.op,args.group_by,args.run)
         elif args.cmd=="meta":

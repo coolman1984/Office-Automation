@@ -51,6 +51,8 @@ xl2ai query meta column_roles
 xl2ai query meta grain
 xl2ai query meta time_coverage
 xl2ai query meta duplicates
+xl2ai query meta repairs
+xl2ai query repaired <table-id>
 xl2ai query trace <table-id> 25
 ```
 
@@ -88,6 +90,10 @@ row represents rather than assuming -- `SUM`/`COUNT` over a table with an unclea
 under-count depending on a fact nobody has confirmed yet. Column roles (`query meta column_roles`) are `inferred`
 guesses about what a column *means* (money, a category, an identifier, ...); treat them the same as any other
 inferred fact -- useful for orientation, not a substitute for a pack's confirmed definition.
+
+`query meta repairs`/`query repaired` show cleanup *suggestions* (null markers, inconsistent spelling, text
+numbers), on by request only (`[repair].enabled=true`) and never applied to the data itself. If a question
+depends on whether a value like "N/A" counts as missing, check `query meta repairs` rather than assuming either way.
 
 ## Token discipline
 

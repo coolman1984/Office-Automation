@@ -23,6 +23,7 @@ STAGES = {
     "catalog": ("xl2ai.catalog", "main", "build stable source/table/column identities for a run"),
     "analyze": ("xl2ai.analyze", "main", "profile data, flag generic quality issues and infer candidate keys"),
     "semantics": ("xl2ai.semantics", "main", "infer column roles, units, table grain, time coverage and draft definitions"),
+    "repair": ("xl2ai.repair", "main", "suggest opt-in, reversible repairs (null tokens, category spelling, text-as-number)"),
     "relations": ("xl2ai.relations", "main", "infer conservative relationships between tables"),
     "rules": ("xl2ai.rules", "main", "run configured deterministic business rules and KPIs"),
     "changes": ("xl2ai.changes", "main", "compare a run with the previous trusted run"),

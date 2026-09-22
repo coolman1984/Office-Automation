@@ -21,6 +21,7 @@ DEFAULTS = {
                 "open_timeout": 180, "visible": False, "sheets": []},
     "analysis": {"sample_values": 5, "top_k": 5, "relation_sample": 1000, "row_hash_max_rows": 200_000},
     "rules": {"packs": [], "block_on_error": False},
+    "repair": {"enabled": False, "null_tokens": True, "category_consolidation": True, "text_coercion": True},
     "ai": {"context_tokens": 4000, "query_rows": 50, "query_bytes": 8192, "query_timeout": 5},
 }
 SOURCE_KEYS = {"path": str, "alias": str}
@@ -96,6 +97,7 @@ class Config:
         self.rule_packs = tuple(cfg["rules"]["packs"])
         self.block_on_rule_error = cfg["rules"]["block_on_error"]
         self.ai = cfg["ai"]
+        self.repair = cfg["repair"]
 
     runs_dir = property(lambda self: os.path.join(self.data_dir, "runs"))
     current_file = property(lambda self: os.path.join(self.data_dir, "current.json"))

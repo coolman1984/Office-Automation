@@ -69,7 +69,9 @@ xl2ai/                      PLATFORM: no domain knowledge, ever
   sources/   detect (format, DRM, encryption, temp files), inventory (sheets, visibility, pivots, names, links)
   extract/   com, layout, regions*, headers*, coltypes, dates, names, store, sheet, verify, pipeline
              formulas*, pivots*                                        (* = new phases)
-  normalize/ null tokens, whitespace/case variants, text->number/date (opt-in, every change recorded)
+  repair.py  opt-in cleanup suggestions (null tokens, category spelling, text-as-number); never writes to a data
+             table -- every suggestion lives only in `_repairs`, applied on the fly by `query repaired`
+  normalize/ (superseded by repair.py above for the cases it covers) text->date coercion remains planned
   profile/   per-column stats, samples, distributions
   quality/   generic checks -> findings with severity, codes, evidence
   schema/    table registry, schema fingerprints, drift, rename detection

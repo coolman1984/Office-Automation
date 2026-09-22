@@ -74,7 +74,9 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | Excel error cells (#DIV/0!, #N/A, #NUM!, #NAME?) | covered [test_error_cells] |
 | dates: 1900 system, phantom 1900-02-29, 1904 system, times, elapsed time | covered [test_dates_times, test_1904_workbook] |
 | mixed date formats within a column | partial (falls back to .Value mask; untested) P4 |
-| text that looks like numbers/dates ("1,234", "12/03/2025", "N/A", "-") | planned P4 (normalize, opt-in, recorded) |
+| text that looks like a number with thousands separators ("1,234") | covered, opt-in, suggested only [test_repair.py:test_text_as_number_suggested] -- `[repair].enabled=true`, never applied in place |
+| text that looks like a date ("12/03/2025") | planned P4 (date-format ambiguity -- DD/MM vs MM/DD -- needs locale or explicit config, not a safe default guess) |
+| null-marker text ("N/A", "-", "(blank)") -> NULL | covered, opt-in, suggested only [test_repair.py:test_null_token_suggested_when_enabled] |
 | currency/percent/scientific formats, custom formats | partial (typed by value; format not kept) P4 |
 | lone surrogates / control characters | partial (unit-tested repair) |
 | STRICT tables | covered [test_strict_mode] |
@@ -103,9 +105,12 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 
 ## G. Data quality (seeded-defect fixtures; clean data must yield zero findings)
 
-Nulls, duplicates (exact and by candidate key), case/whitespace variants, near-duplicate spellings, out-of-range and
-outlier numbers, impossible dates, mixed types, constant columns, high-cardinality IDs, orphan rows, unit mix.
-Status: planned P4.
+Nulls, duplicates (exact and by candidate key), near-duplicate spellings, out-of-range and outlier numbers,
+impossible dates, mixed types, constant columns, high-cardinality IDs, orphan rows, unit mix. Status: planned P4.
+
+Case/whitespace category variants ("Cairo" / "cairo" / " CAIRO "): covered as an opt-in repair suggestion, not a
+finding [test_repair.py:test_category_consolidation_picks_most_frequent_spelling] -- canonical spelling chosen by
+frequency, suggested via `_repairs`, never rewritten in place.
 
 ## H. Scale and performance benchmarks (recorded, regression-tracked)
 

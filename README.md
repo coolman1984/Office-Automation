@@ -36,6 +36,9 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Reports on what it could not fully read: Power Query, the Data Model, external links, stale-calculation,
   totals rows mixed into data, and unread chart sources -- surfaced as `blind_spots` in the AI context pack and
   as `gaps` in `xl2ai brief`, never silently treated as complete.
+- Opt-in, reversible cleanup suggestions (null markers, inconsistent category spelling, text-as-number) that
+  never touch the extracted data -- off by default (`[repair].enabled=false`); `xl2ai query repaired` previews
+  them applied, on the fly, without writing anything.
 
 ## Install
 

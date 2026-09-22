@@ -51,6 +51,11 @@ CREATE TABLE _time_coverage (
 CREATE TABLE _duplicate_candidates (
   id TEXT PRIMARY KEY, table_id_a TEXT NOT NULL, table_id_b TEXT NOT NULL, method TEXT, score REAL, evidence TEXT
 );
+CREATE TABLE _repairs (
+  id TEXT PRIMARY KEY, table_id TEXT NOT NULL, column_id TEXT NOT NULL, xl_row INTEGER,
+  original_value TEXT, repaired_value TEXT, rule TEXT NOT NULL
+);
+CREATE INDEX idx_repairs_table ON _repairs(table_id);
 CREATE TABLE _columns (
   column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT NOT NULL,
   original_header TEXT, xl_col INTEGER, xl_col_letter TEXT, sql_type TEXT, kind TEXT,

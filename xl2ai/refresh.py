@@ -140,6 +140,13 @@ def stage_changes(run, st, cfg, ctx):
         st.detail("changes", con.execute("SELECT COUNT(*) FROM _changes").fetchone()[0])
 
 
+def stage_repair(run, st, cfg, ctx):
+    from .repair import build_repairs
+    path = build_repairs(cfg, run.id, ctx.get("catalog"))
+    with ro_connection(path) as con:
+        st.detail("repair_suggestions", con.execute("SELECT COUNT(*) FROM _repairs").fetchone()[0])
+
+
 def stage_rules(run, st, cfg, ctx):
     from .rules import run_packs
     path = run_packs(cfg, run.id, ctx.get("catalog"))
@@ -257,9 +264,9 @@ def stage_extract(run, st, cfg, ctx):
 
 
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
-          ("analyze", stage_analyze), ("semantics", stage_semantics), ("rules", stage_rules),
-          ("relations", stage_relations), ("changes", stage_changes), ("audit", stage_audit),
-          ("contextpack", stage_contextpack), ("report", stage_report))
+          ("analyze", stage_analyze), ("semantics", stage_semantics), ("repair", stage_repair),
+          ("rules", stage_rules), ("relations", stage_relations), ("changes", stage_changes),
+          ("audit", stage_audit), ("contextpack", stage_contextpack), ("report", stage_report))
 # rules runs before relations: pack-confirmed keys must exist in `_keys` before relation inference can use them
 # as trusted parent candidates (see relations.infer_relations), not just generic uniqueness-inferred ones.
 

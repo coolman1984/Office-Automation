@@ -60,6 +60,7 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_table_grain` [built] | table_id, columns_json, description, status (`inferred\|confirmed\|unknown`), confidence, method |
 | `_time_coverage` [built] | table_id, column_id, min_value, max_value |
 | `_duplicate_candidates` [built] | id, table_id_a, table_id_b, method, score, evidence -- cross-file, never same-workbook |
+| `_repairs` [built, opt-in] | id, table_id, column_id, xl_row, original_value, repaired_value, rule (`null_token\|category_consolidation\|text_as_number`) -- empty unless `[repair].enabled = true`; never written back to any data table |
 
 ## 4. Run manifest [phase 1] `manifest.json`
 
