@@ -13,6 +13,7 @@ from ..core.procs import kill_pid
 from ..sources.detect import sniff_file
 from ..sources.inventory import expand_paths
 from .com import ExcelDied, ExcelSession, com_msg
+from ..core.log import is_silent
 from .common import PYWIN32_AVAILABLE, SCHEMA_VERSION, VISIBILITY, log, pywintypes
 from .names import sanitize_table
 from .sheet import SheetResult, extract_sheet
@@ -22,6 +23,13 @@ from .verify import verify_table
 
 def process_file(src, db_path, opts):
     t_run = time.perf_counter()
+    if os.name != "nt" or not PYWIN32_AVAILABLE:
+        # Say so plainly. Without this the COM objects are all None and the first failure surfaces as an
+        # unrelated AttributeError deep inside the error handling itself.
+        msg = ("Excel extraction requires Windows, Microsoft Excel and pywin32. "
+               "Metadata, query and reporting commands still work on this machine.")
+        log("ERROR", msg)
+        return 1, [], msg
     partial = db_path + ".partial"
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     kind = sniff_file(src, getattr(opts, "wrapper_prefixes", ()))
@@ -81,7 +89,9 @@ def process_file(src, db_path, opts):
                     break
             res.total_sec = time.perf_counter() - t
             tag = f" | {vis}" if vis != "visible" else ""
-            if res.status == "extracted":
+            if is_silent():                              # a live view owns the screen; it renders these itself
+                pass
+            elif res.status == "extracted":
                 print(f"[{i}/{total}] {name.strip()}: {res.data_rows:,} rows x {res.columns} cols | header row "
                       f"{res.header_row or 'none'} | read {res.read_sec:.2f}s | write {res.write_sec:.2f}s{tag}"
                       + (f" | {res.message}" if res.message else ""), flush=True)
@@ -102,7 +112,7 @@ def process_file(src, db_path, opts):
                         log("ERROR", f"  MISMATCH in '{res.sheet_name}': {b} of {c} checks (see _verification)")
             log("INFO", f"Verification: {checks} checks, {mismatches} mismatch(es) in {time.perf_counter() - t:.1f}s")
     except Exception as e:
-        fatal = com_msg(e) if isinstance(e, pywintypes.com_error) else str(e)
+        fatal = com_msg(e) if pywintypes is not None and isinstance(e, pywintypes.com_error) else str(e)
         log("ERROR", fatal)
     finally:
         t = time.perf_counter()
@@ -126,7 +136,8 @@ def process_file(src, db_path, opts):
     con.execute("PRAGMA optimize")
     con.close()
     os.replace(partial, db_path)
-    print_summary(results, open_s, close_s, total_s, db_path, checks, mismatches)
+    if not is_silent():
+        print_summary(results, open_s, close_s, total_s, db_path, checks, mismatches)
     failed = any(r.status == "error" for r in results)
     return (3 if mismatches else 2 if failed else 0), results, ""
 

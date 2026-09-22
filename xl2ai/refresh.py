@@ -10,18 +10,26 @@ import json
 import os
 import shutil
 import sys
+import time
 
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.fsutil import atomic_write_json
-from .core.log import log
+from .core.log import is_silent, log
 from .core.runs import CONTRACT_VERSION, Lock, Run, current_run_id, load_manifest, now_iso, reap_orphans
 from .core.sqliteutil import ro_connection
+from .observe import events as E
+from .observe.bus import BUS
+from .observe.journal import Journal, path_for_run as journal_path_for_run
 from .sources.inventory import build_inventory
 
 
 def stage_sources(run, st, cfg, ctx):
     sources, warnings = build_inventory(cfg)
+    for s in sources:
+        BUS.emit(E.SOURCE_FOUND, s["source_id"], source_id=s["source_id"], path=s["path"], size=s["size"])
+        BUS.emit(E.SOURCE_HASHED, s["source_id"], source_id=s["source_id"], size=s["size"],
+                 sha256=s["sha256"], hash_mode=s["hash_mode"])
     for w in warnings:
         st.warn(w)
     path = run.path("sources.json")
@@ -193,14 +201,28 @@ def stage_extract(run, st, cfg, ctx):
             st.artifact(db)
             per.append(info)
             codes.add(0)
+            BUS.emit(E.SOURCE_REUSED, "unchanged source; reused previous trusted extraction",
+                     source_id=s["source_id"], from_run=reusable["run_id"], mode=mode)
             log("INFO", f"Reused unchanged source '{s['source_id']}' from run {reusable['run_id']} ({mode}); Excel not opened")
             continue
 
         if process_file is None:
             from .extract.pipeline import process_file as _process_file
             process_file = _process_file
-        print(f"\n{'=' * 100}\n{s['path']}\n{'=' * 100}")
-        code, results, message = process_file(s["path"], db, opts)
+        if not is_silent():
+            print(f"\n{'=' * 100}\n{s['path']}\n{'=' * 100}")
+        with BUS.scope(source_id=s["source_id"]):
+            BUS.emit(E.SOURCE_EXTRACT_START, s["source_id"], source_id=s["source_id"], path=s["path"])
+            started = time.perf_counter()
+            code, results, message = process_file(s["path"], db, opts)
+            for r in results:
+                BUS.emit(E.SHEET_END, r.message or "", level="error" if r.status == "error" else "info",
+                         name=r.sheet_name, status=r.status, rows=r.data_rows, columns=r.columns,
+                         seconds=round(r.total_sec, 3))
+            BUS.emit(E.SOURCE_EXTRACT_END, message or "",
+                     level="error" if code in (1, 3) else "info",
+                     source_id=s["source_id"], status="error" if code in (1, 3) else "extracted",
+                     exit_code=code, seconds=round(time.perf_counter() - started, 3))
         codes.add(code)
         info = {"source_id": s["source_id"], "exit_code": code, "db": None, "message": message, "reused": False,
                 "sheets": {k: sum(r.status == k for r in results) for k in ("extracted", "skipped", "error")}}
@@ -239,14 +261,33 @@ def run_refresh(cfg, force=False):
         run = Run.create(cfg)
         log("INFO", f"Run {run.id} started (project '{cfg.project}')")
         ctx = {"force_extract": bool(force)}
+        journal = Journal(journal_path_for_run(run.dir)).open()
+        detach = journal.attach(BUS)
+        BUS.emit(E.RUN_START, f"run {run.id} started", run_id=run.id, project=cfg.project)
         try:
             for name, fn in STAGES:
-                with run.stage(name) as st:
-                    fn(run, st, cfg, ctx)
-                if run.stage_status(name) != "passed":
-                    break                                   # later stages need this stage's output
+                with BUS.scope(stage=name):
+                    BUS.emit(E.STAGE_START, name, name=name)
+                    with run.stage(name) as st:
+                        fn(run, st, cfg, ctx)
+                    status = run.stage_status(name)
+                    record = next((s for s in run.m["stages"] if s["name"] == name), {})
+                    BUS.emit(E.STAGE_END, name, level="error" if status != "passed" else "info",
+                             name=name, status=status, seconds=record.get("seconds"),
+                             error=record.get("error"), details=record.get("details") or {})
+                    for key, value in (record.get("details") or {}).items():
+                        if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                            BUS.emit(E.STAGE_DETAIL, "", **{key: value})
+                    for warning in record.get("warnings") or []:
+                        BUS.warn(E.WARNING, warning)
+                    if status != "passed":
+                        break                               # later stages need this stage's output
         finally:
             promoted = run.finish()
+            BUS.emit(E.RUN_END, f"run {run.m['status']}", run_id=run.id,
+                     status=run.m["status"], promoted=bool(promoted))
+            detach()
+            journal.close()
         code = 0 if promoted else (2 if run.m["status"] == "partial" else 1)
         return code, run
 

@@ -14,6 +14,8 @@ STAGES = {
     "doctor": ("xl2ai.doctor", "main", "check environment, sources, storage and current dataset"),
     "audit": ("xl2ai.audit", "main", "verify run artifacts and cross-database consistency"),
     "refresh": ("xl2ai.refresh", "main", "run every stage into a new run; promote it only if valid"),
+    "watch": ("xl2ai.console.app", "main", "refresh with a live step-by-step view (--demo to see it without Excel)"),
+    "diagnose": ("xl2ai.console.app", "diagnose_main", "explain what a run did and where it failed (--ai for AI help)"),
     "status": ("xl2ai.status", "main", "show the current dataset, its freshness and the last attempt"),
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),
     "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite via Excel COM, verified against Excel (stand-alone)"),
