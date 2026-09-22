@@ -106,6 +106,21 @@ CREATE TABLE _unsupported (
 CREATE TABLE _formulas (
   column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, has_formula INTEGER, sample_r1c1 TEXT
 );
+CREATE TABLE _regions (
+  table_id TEXT NOT NULL, region_no INTEGER, first_row INTEGER, first_col INTEGER, last_row INTEGER,
+  last_col INTEGER, header_row INTEGER, kind TEXT, cells INTEGER, complete INTEGER,
+  PRIMARY KEY (table_id, region_no)
+);
+CREATE TABLE _header_groups (
+  column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, xl_col INTEGER, path TEXT, method TEXT
+);
+CREATE TABLE _formula_refs (
+  column_id TEXT NOT NULL, table_id TEXT NOT NULL, ref_workbook TEXT, ref_sheet TEXT, cells INTEGER, sample TEXT
+);
+CREATE TABLE _lineage (
+  id TEXT PRIMARY KEY, table_id TEXT NOT NULL, column_id TEXT, ref_kind TEXT, ref_workbook TEXT, ref_sheet TEXT,
+  target_source_id TEXT, target_table_id TEXT, status TEXT, cells INTEGER, sample TEXT, method TEXT
+);
 CREATE INDEX idx_columns_table ON _columns(table_id);
 CREATE INDEX idx_unsupported_table ON _unsupported(table_id);
 CREATE INDEX idx_tables_source ON _tables(source_id);
@@ -214,6 +229,26 @@ def build_catalog(cfg, run_id, manifest=None):
                             if cid:
                                 con.execute("INSERT OR REPLACE INTO _formulas VALUES (?,?,?,?)",
                                             (cid, table_id, int(has_formula), sample))
+                    if "_regions" in src_tables:
+                        con.executemany("INSERT OR REPLACE INTO _regions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                        [(table_id,) + tuple(r) for r in src.execute(
+                                            "SELECT region_no, first_row, first_col, last_row, last_col, header_row,"
+                                            " kind, cells, complete FROM _regions WHERE table_name=?"
+                                            " ORDER BY region_no", (table_name,))])
+                    if "_header_groups" in src_tables:
+                        for xl_col, sql_name, path, method in src.execute(
+                                "SELECT xl_col, sql_name, path, method FROM _header_groups WHERE table_name=?",
+                                (table_name,)).fetchall():
+                            if sql_name in col_ids:
+                                con.execute("INSERT OR REPLACE INTO _header_groups VALUES (?,?,?,?,?)",
+                                            (col_ids[sql_name], table_id, xl_col, path, method))
+                    if "_formula_refs" in src_tables:
+                        for sql_name, book, sheet, cells, sample in src.execute(
+                                "SELECT sql_name, ref_workbook, ref_sheet, cells, sample FROM _formula_refs"
+                                " WHERE table_name=?", (table_name,)).fetchall():
+                            if sql_name in col_ids:
+                                con.execute("INSERT INTO _formula_refs VALUES (?,?,?,?,?,?)",
+                                            (col_ids[sql_name], table_id, book, sheet, cells, sample))
                 if "_unsupported" in src_tables:
                     for scope, sheet_n, kind, count, detail in src.execute(
                         "SELECT scope,sheet_name,kind,count,detail FROM _unsupported").fetchall():
@@ -221,6 +256,8 @@ def build_catalog(cfg, run_id, manifest=None):
                         uid = hashlib.sha1(f"{sid}|{scope}|{sheet_n}|{kind}|{detail}".encode()).hexdigest()[:20]
                         con.execute("INSERT OR REPLACE INTO _unsupported VALUES (?,?,?,?,?,?,?,?)",
                                     (uid, sid, table_id, scope, sheet_n, kind, int(count or 0), detail))
+        from .lineage import build_lineage
+        build_lineage(con)
         con.commit()
         con.execute("PRAGMA optimize")
     finally:

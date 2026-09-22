@@ -26,15 +26,17 @@ additive = minor, breaking = major (a major bump requires a migration note in `C
 | Table | Contract |
 |---|---|
 | one data table per extracted table | first column `_xl_row` INTEGER (Excel row); typed columns; NULL = empty or error cell |
-| `_meta` [built] | key/value: schema_version, source_path/size/modified, extracted_at, tool, excel_restarts, verify_checks, verify_mismatches, total_seconds |
+| `_meta` [built] | key/value: schema_version, source_path/size/modified, extracted_at, tool, engine (direct engine only; absent = Excel), excel_restarts, verify_checks, verify_mismatches, total_seconds |
 | `_extraction_log` [built] | per sheet: status (`extracted|skipped|error`), message, header_row, first/last row/col, data_rows, columns, blank_rows_skipped, error_cells, formula_cells, pivot_tables, filter_active, merged_areas, merged_in_data, read/write/total seconds |
 | `_columns` [built] | table_name, position, sql_name, original_header, xl_col, xl_col_letter, sql_type, kind, date_format, non_null, error_cells |
 | `_cell_errors`, `_sheet_preamble`, `_merged_areas` [built] | as named |
 | `_verification` [built] | table_name, column_name, check_name (`counta|sum|cells_total`), excel_value, sqlite_value, ok (1/0/NULL), note |
 | `_tables` extras [built] | `header_confidence` (0-1), `header_reasons` (plain-language list) -- computed from the chosen header row's own values, no COM cost beyond what extraction already reads |
-| `_tables` regions [phase 2] | region, header_rows[] (multi-row/hierarchical), source (`detected|config`) -- one table per sheet remains the identity model until this phase |
+| `_regions` [built] | table_name, region_no, first_row, first_col, last_row, last_col, header_row, kind (`table\|note`), cells, complete (0 = only the first block of a huge sheet was scanned) -- written only when a sheet holds more than one table; one table per sheet remains the identity model |
+| `_header_groups` [built] | table_name, xl_col, sql_name, path (JSON list of group labels, outermost first), method (`merged_area\|label_run`) |
+| `_formula_refs` [built, direct engine on .xlsx/.xlsm] | table_name, sql_name, ref_workbook, ref_sheet, cells, sample -- every formula of the column read, not a sample |
 | `_formulas` [built, per-column only] | table_name, sql_name, has_formula, sample_r1c1 (one sample per column; full run-length R1C1 patterns remain phase 3) |
-| `_unsupported` [built] | scope (`workbook`\|`sheet`), sheet_name, kind (`power_query`\|`data_model`\|`external_link`\|`stale_calculation`\|`chart`), count, detail |
+| `_unsupported` [built] | scope (`workbook`\|`sheet`), sheet_name, kind (`power_query`\|`data_model`\|`external_link`\|`stale_calculation`\|`chart`\|`reader_limit`), count, detail |
 | `_pivots`, `_names` [phase 3] | pivot definitions, defined names (pivot *output* and formula *values* are already extracted; their definitions are not) |
 
 Invariants (checked by `_verification`): stored cells == Excel `COUNTA` of the whole sheet; per-column non-null and
@@ -60,6 +62,8 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_table_grain` [built] | table_id, columns_json, description, status (`inferred\|confirmed\|unknown`), confidence, method |
 | `_time_coverage` [built] | table_id, column_id, min_value, max_value |
 | `_duplicate_candidates` [built] | id, table_id_a, table_id_b, method, score, evidence -- cross-file, never same-workbook |
+| `_regions`, `_header_groups`, `_formula_refs` [built] | the extract tables above keyed by table_id / column_id |
+| `_lineage` [built] | id, table_id, column_id, ref_kind (`sheet\|workbook`), ref_workbook, ref_sheet, target_source_id, target_table_id, status (`resolved\|unresolved\|external`), cells, sample, method (`all_formulas\|formula_sample`) -- always `inferred`; own-sheet references are not lineage |
 | `_repairs` [built, opt-in] | id, table_id, column_id, xl_row, original_value, repaired_value, rule (`null_token\|category_consolidation\|text_as_number`) -- empty unless `[repair].enabled = true`; never written back to any data table |
 
 ## 4. Run manifest [phase 1] `manifest.json`

@@ -11,6 +11,7 @@ from .common import ERROR_TEXT, ERR_HI, ERR_LO, HEADER_SCAN_ROWS, XL_FORMULAS, X
 from .dates import classify_format, serial_to_iso
 from .layout import find_extent, find_header, find_merged_areas, header_confidence, show_filtered_rows
 from .names import build_columns, clean_header, col_letter, q
+from .regions import find_regions, header_groups, multiple_tables
 
 class SheetResult:
     def __init__(self, idx, name, table, visibility):
@@ -19,7 +20,31 @@ class SheetResult:
                              first_col=None, last_col=None, data_rows=0, columns=0, blank_rows_skipped=0,
                              error_cells=0, formula_cells=None, pivot_tables=None, filter_active=None,
                              merged_areas=0, merged_in_data=None, header_cells=0, preamble_cells=0, read_sec=0.0, write_sec=0.0, total_sec=0.0, plans=[], data_first=None,
-                             header_confidence=None, header_reasons=None)
+                             header_confidence=None, header_reasons=None,
+                             regions=[], regions_complete=1, header_groups={}, header_groups_method=None)
+
+
+def record_structure(res, first_blk, fr, fc, lr, hdr, merged):
+    """Separate table regions and grouped header rows, from values already read (no extra Excel calls)."""
+    regions = find_regions(first_blk, fr, fc)
+    if multiple_tables(regions):
+        res.regions = regions
+        res.regions_complete = int(len(first_blk) >= lr - fr + 1)
+    res.header_groups, res.header_groups_method = header_groups(first_blk, hdr, fr, fc, merged)
+
+
+def write_structure(con, res):
+    import json
+    for n, g in enumerate(res.regions, 1):
+        con.execute("INSERT INTO _regions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (res.table_name, n, g["first_row"], g["first_col"], g["last_row"], g["last_col"],
+                     g["header_row"], g["kind"], g["cells"], res.regions_complete))
+    by_col = {p.xl_col: p.name for p in res.plans}
+    for xl_col, path in sorted(res.header_groups.items()):
+        if xl_col in by_col:
+            con.execute("INSERT INTO _header_groups VALUES (?,?,?,?,?)",
+                        (res.table_name, xl_col, by_col[xl_col], json.dumps(path, ensure_ascii=False),
+                         res.header_groups_method))
 
 
 def iter_data(blocks, data_first, counters):
@@ -116,6 +141,7 @@ def extract_sheet(sess, idx, con, res, opts, budget):
     # and just flag the data region (walking every merged area there is far too slow).
     merged = sess.call(lambda: find_merged_areas(ws, fr, min(lr, fr + HEADER_SCAN_ROWS), fc, lc))
     res.merged_areas = len(merged)
+    record_structure(res, first_blk, fr, fc, lr, hdr, merged)
     if data_first <= lr:
         try:                                         # False = none merged, True/Null(mixed) = some merged
             mc = sess.call(lambda: ws.Range(ws.Cells(data_first, fc), ws.Cells(lr, lc)).MergeCells)
@@ -219,6 +245,7 @@ def extract_sheet(sess, idx, con, res, opts, budget):
                 continue
     for area, val in merged:
         con.execute("INSERT INTO _merged_areas VALUES (?,?,?)", (res.sheet_name, area, val))
+    write_structure(con, res)
     res.status = "extracted"
     if not total_rows:
         res.message = "header only (no data rows)"

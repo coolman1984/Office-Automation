@@ -22,7 +22,23 @@ from .unsupported import detect_sheet_unsupported, detect_stale_calculation, det
 from .verify import verify_table
 
 
+def resolve_engine(opts):
+    """'excel' | 'direct' for `[extract] engine` (auto = Excel when this machine can drive it, else direct)."""
+    engine = getattr(opts, "engine", "auto") or "auto"
+    if engine == "auto":
+        return "excel" if os.name == "nt" and PYWIN32_AVAILABLE else "direct"
+    return engine
+
+
 def process_file(src, db_path, opts):
+    """Extract one workbook with the configured engine. Returns (exit_code, [SheetResult], message)."""
+    if resolve_engine(opts) == "direct":
+        from .direct import process_file_direct
+        return process_file_direct(src, db_path, opts)
+    return process_file_excel(src, db_path, opts)
+
+
+def process_file_excel(src, db_path, opts):
     t_run = time.perf_counter()
     if os.name != "nt" or not PYWIN32_AVAILABLE:
         # Say so plainly. Without this the COM objects are all None and the first failure surfaces as an
@@ -192,7 +208,7 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    ap = argparse.ArgumentParser(prog="xl2ai extract", description="Extract Excel workbooks into SQLite via Excel COM.")
+    ap = argparse.ArgumentParser(prog="xl2ai extract", description="Extract Excel workbooks into SQLite (via Excel COM, or directly without Excel).")
     ap.add_argument("paths", nargs="+", help="Excel file(s), folder(s) or wildcard(s)")
     ap.add_argument("-o", "--output", help="output .db file (single input) or output folder")
     ap.add_argument("--no-verify", dest="verify", action="store_false", help="skip the Excel-vs-SQLite check")
@@ -202,9 +218,12 @@ def main(argv=None):
     ap.add_argument("--cache-cells", type=int, default=12_000_000, help="cache a sheet in RAM up to this many cells")
     ap.add_argument("--open-timeout", type=int, default=180, help="seconds before a hung open is killed")
     ap.add_argument("--visible", action="store_true", help="show the Excel window (debugging)")
+    ap.add_argument("--engine", choices=("auto", "excel", "direct"), default="auto",
+                    help="excel = drive Excel via COM (Windows; opens DRM files); direct = read the file itself "
+                         "(any OS, faster); auto = excel when available, else direct")
     opts = ap.parse_args(argv)
-    if os.name != "nt" or not PYWIN32_AVAILABLE:
-        log("ERROR", "Excel extraction requires Windows, Microsoft Excel and pywin32. Metadata/query commands can still run.")
+    if resolve_engine(opts) == "excel" and (os.name != "nt" or not PYWIN32_AVAILABLE):
+        log("ERROR", "The Excel engine requires Windows, Microsoft Excel and pywin32. Use --engine direct.")
         return 1
     opts.sheets = {s.strip().lower() for s in opts.sheet}
     opts.wrapper_prefixes = wrapper_prefixes_or_empty()       # from xl2ai.toml if one is found, else none

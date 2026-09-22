@@ -183,7 +183,7 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                         formulas, pivots, merged = (int(v or 0) for v in x)
                         if formulas:
                             _add_finding(con, "DQ_FORMULAS_VALUE_ONLY", "warn", table_id, None, formulas, [],
-                                         "formula results were extracted as values; formula logic is not yet represented in the catalog")
+                                         "formula results were extracted as values; which sheets they pull from is in query meta lineage")
                         if pivots:
                             _add_finding(con, "DQ_PIVOT_OUTPUT_ONLY", "warn", table_id, None, pivots, [],
                                          "pivot output was extracted; pivot definition/source logic is not yet represented")

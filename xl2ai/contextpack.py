@@ -99,6 +99,14 @@ def _render_markdown(p):
         lines += ["", "## Data-quality warnings"]
         for d in p["quality"]:
             lines.append(f"- {d['severity']} {d['code']} | {d['subject']} | {d['message']}")
+    if p.get("lineage"):
+        lines += ["", "## Computed from (formula lineage)"]
+        for x in p["lineage"]:
+            lines.append(f"- {x['table']} <- {x['from']}" + ("" if x["status"] == "resolved" else f" ({x['status']})"))
+    if p.get("regions"):
+        lines += ["", "## Sheets holding several tables (read with query region)"]
+        for x in p["regions"]:
+            lines.append(f"- {x['table']}: {x['tables_in_sheet']} tables")
     if p.get("blind_spots"):
         lines += ["", "## Blind spots (could not be fully read)"]
         for b in p["blind_spots"]:
@@ -212,6 +220,21 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                           {"code": code, "severity": severity, "subject": subject, "message": message},
                           budget_tokens, omitted, "quality", state)
 
+        present = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "_lineage" in present:
+            for tid, book, ref_sheet, target, status in con.execute(
+                    """SELECT DISTINCT table_id, ref_workbook, ref_sheet, target_table_id, status FROM _lineage
+                       ORDER BY table_id, ref_workbook, ref_sheet"""):
+                _add_budgeted(payload, "lineage",
+                              {"table": handles.get(tid, tid),
+                               "from": handles.get(target) or ((book + "!") if book else "") + (ref_sheet or ""),
+                               "status": status},
+                              budget_tokens, omitted, "lineage", state)
+        if "_regions" in present:
+            for tid, n in con.execute("""SELECT table_id, COUNT(*) FROM _regions WHERE kind='table'
+                                         GROUP BY table_id HAVING COUNT(*) > 1 ORDER BY table_id"""):
+                _add_budgeted(payload, "regions", {"table": handles.get(tid, tid), "tables_in_sheet": int(n)},
+                              budget_tokens, omitted, "regions", state)
         has_unsupported = con.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_unsupported'").fetchone()[0]
         if has_unsupported:
@@ -226,7 +249,8 @@ def build_context_pack(cfg, run_id, catalog_path=None):
         use = {"sources":"query schema","tables":"query schema","tables_without_columns":"query describe",
                "columns":"query describe","relationships":"query meta relationships",
                "definitions":"query meta definitions","kpis":"query meta kpis","rules":"query meta rules",
-               "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief"}
+               "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief",
+               "lineage":"query meta lineage","regions":"query meta regions"}
         payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
                               for k,v in sorted(omitted.items()) if v]
         base = dict(payload)

@@ -26,8 +26,10 @@ Every stage below is implemented and tested. If a command you expect is not list
 exist yet — check `ARCHITECTURE.md` roadmap and `AGENT_READINESS_PLAN.md` before assuming, and never invent one.
 
 - `sources` — inventory and fingerprint configured files (path, size, mtime, SHA-256, duplicate/wrapper detection)
-- `extract` — Excel workbook -> verified SQLite, one database per workbook, byte-for-byte checked against Excel
-- `catalog` — stable table/column identities for a run
+- `extract` — Excel workbook -> verified SQLite, one database per workbook; `engine=excel` checks every column
+  against Excel itself, `engine=direct` reads the file without Excel and checks against a second XML reader.
+  Also records several-tables-per-sheet (`_regions`), grouped headers and every formula's sheet references
+- `catalog` — stable table/column identities for a run, plus formula lineage (which sheet feeds which)
 - `analyze` — column profiling, generic data-quality findings, candidate keys, row fingerprints
 - `semantics` — column roles, units/currency, table grain, time coverage, auto-drafted definitions
 - `repair` — opt-in, reversible cleanup suggestions (never applied in place; see `query repaired`)
@@ -35,7 +37,7 @@ exist yet — check `ARCHITECTURE.md` roadmap and `AGENT_READINESS_PLAN.md` befo
 - `rules` — deterministic business rules and KPIs from human-authored packs
 - `changes` — run-to-run diff: schema, volume, values, categories, distributions, KPIs, row multisets
 - `pack` — the compact, token-budgeted AI context pack (`ai/context_pack.md` / `.json`)
-- `query` — read-only, capped tools: `schema describe sample aggregate meta compare trace sql`
+- `query` — read-only, capped tools: `schema describe sample repaired aggregate meta region compare trace sql`
 - `refresh` — runs every stage above into a new run, promotes it only if it earned it
 - `watch` / `diagnose` — live progress view and post-run failure diagnosis
 - `status` / `report` / `doctor` / `audit` / `brief` / `agent-brief` — health, freshness and orientation

@@ -63,11 +63,23 @@ def _render_changes(con):
     return lines
 
 
+def _a1(row, col):
+    letters = ""
+    while col:
+        col, rem = divmod(col - 1, 26)
+        letters = chr(65 + rem) + letters
+    return f"{letters}{row}"
+
+
 def _column_lines(con, table_id):
     has_roles = con.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_column_roles'").fetchone()[0]
     cols = con.execute("SELECT column_id,name,sql_type FROM _columns WHERE table_id=? ORDER BY position",
                        (table_id,)).fetchall()
+    groups = {}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='_header_groups'").fetchone():
+        groups = {r[0]: json.loads(r[1] or "[]") for r in con.execute(
+            "SELECT column_id,path FROM _header_groups WHERE table_id=?", (table_id,)).fetchall()}
     roles = {}
     if has_roles:
         roles = {r[0]: (r[1], r[2], r[3]) for r in con.execute(
@@ -76,7 +88,8 @@ def _column_lines(con, table_id):
     for cid, name, sql_type in cols:
         role, unit, currency = roles.get(cid, (None, None, None))
         tag = f" [{role}" + (f", {currency}" if currency else f", {unit}" if unit else "") + "]" if role else ""
-        lines.append(f"    - {name} ({sql_type}){tag}")
+        under = f" -- under {' > '.join(groups[cid])}" if groups.get(cid) else ""
+        lines.append(f"    - {name} ({sql_type}){tag}{under}")
     return lines
 
 
@@ -118,6 +131,21 @@ def build_agent_brief(cfg, run_id, catalog_path=None):
                 lines.append(f"Grain: {grain_desc}")
             if t["readiness"] != "ready":
                 lines.append(f"Readiness: **{t['readiness']}**")
+            if t.get("feeds_from"):
+                names = {x[0]: x[1] for x in con.execute("SELECT table_id, table_name FROM _tables")}
+                src = sorted({(names.get(f["table_id"]) and f"`{names[f['table_id']]}`") or
+                              ((f["workbook"] + "!") if f["workbook"] else "") + (f["sheet"] or "") +
+                              (" (not in this project)" if f["status"] != "resolved" else "")
+                              for f in t["feeds_from"]})
+                lines.append("Computed from: " + ", ".join(src) + " (formulas; see `xl2ai query meta lineage`)")
+            if t.get("regions", 0) > 1 and "_regions" in existing:
+                lines.append(f"Holds {t['regions']} separate tables -- read one at a time with "
+                             f"`xl2ai query region {tid} <n>`:")
+                for no, r0, c0, r1, c1, hdr in con.execute(
+                        "SELECT region_no, first_row, first_col, last_row, last_col, header_row FROM _regions "
+                        "WHERE table_id=? AND kind='table' ORDER BY region_no", (tid,)):
+                    lines.append(f"    - region {no}: {_a1(r0, c0)}:{_a1(r1, c1)}"
+                                 + (f", header row {hdr}" if hdr else ", no header row"))
             lines.append("Columns:")
             lines.extend(_column_lines(con, tid))
             lines.append("")

@@ -205,7 +205,9 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
 
 
 META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported",
-                 "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates", "repairs"}
+                 "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates", "repairs",
+                 "regions", "header_groups", "lineage"}
+NEWER_SECTIONS = {"regions": "_regions", "header_groups": "_header_groups", "lineage": "_lineage"}
 
 
 def meta(cfg, section, run_id=None):
@@ -217,6 +219,10 @@ def meta(cfg, section, run_id=None):
         raise Xl2aiError("E_STAGE_INPUT",f"unknown metadata section: {section}",
                          "use one of: " + ", ".join(sorted(META_SECTIONS)))
     with _catalog(catp) as cat:
+        needed=NEWER_SECTIONS.get(section)
+        if needed and not cat.execute("SELECT 1 FROM sqlite_master WHERE name=?",(needed,)).fetchone():
+            return _envelope("meta",[],[],started,cfg,evidence=[{"run_id":rid,"section":section}],
+                             hint=f"this run predates the {section} section; run xl2ai refresh to compute it")
         if section=="relationships":
             cur=cat.execute("""SELECT r.status,r.kind,ft.source_id,ft.table_name,fc.name,
                                       tt.source_id,tt.table_name,tc.name,r.containment,r.method,r.score
@@ -260,6 +266,20 @@ def meta(cfg, section, run_id=None):
         elif section=="duplicates":
             cur=cat.execute("""SELECT table_id_a,table_id_b,method,score,evidence
                                FROM _duplicate_candidates ORDER BY score DESC""")
+        elif section=="regions":
+            cur=cat.execute("""SELECT r.table_id,t.sheet_name,r.region_no,r.kind,r.first_row,r.first_col,r.last_row,
+                                      r.last_col,r.header_row,r.cells,r.complete
+                               FROM _regions r JOIN _tables t ON t.table_id=r.table_id
+                               ORDER BY r.table_id,r.region_no""")
+        elif section=="header_groups":
+            cur=cat.execute("""SELECT g.table_id,c.name,g.path,g.method
+                               FROM _header_groups g JOIN _columns c ON c.column_id=g.column_id
+                               ORDER BY g.table_id,c.position""")
+        elif section=="lineage":
+            cur=cat.execute("""SELECT l.table_id,c.name,l.ref_kind,l.ref_workbook,l.ref_sheet,l.target_table_id,
+                                      l.status,l.cells,l.method,l.sample
+                               FROM _lineage l LEFT JOIN _columns c ON c.column_id=l.column_id
+                               ORDER BY l.table_id,c.position,l.ref_sheet""")
         elif section=="repairs":
             cur=cat.execute("""SELECT table_id,column_id,xl_row,original_value,repaired_value,rule
                                FROM _repairs ORDER BY table_id,xl_row""")
@@ -277,6 +297,7 @@ def meta(cfg, section, run_id=None):
         "column_roles":{"reasons"},
         "grain":{"columns_json"},
         "duplicates":{"evidence"},
+        "header_groups":{"path"},
     }.get(section,set())
     if json_cols:
         indexes={name:i for i,name in enumerate(columns)}
@@ -294,6 +315,55 @@ def meta(cfg, section, run_id=None):
     return _envelope("meta",columns,rows,started,cfg,
                      evidence=[{"run_id":rid,"section":section}],
                      truncated=truncated,hint=f"catalog metadata section: {section}")
+
+
+def region(cfg, selector, region_no, limit=None, run_id=None):
+    """Rows of one detected table region, named by that region's own header row (see `meta regions`).
+
+    A sheet holding several tables is stored as one wide table; this reads one of them back out on the fly --
+    only the region's columns and rows, headers taken from the region's header row. The database is untouched.
+    """
+    started=time.perf_counter()
+    rid,run_dir,catp=_run_paths(cfg,run_id)
+    with _catalog(catp) as cat:
+        tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
+        if not cat.execute("SELECT 1 FROM sqlite_master WHERE name='_regions'").fetchone():
+            raise Xl2aiError("E_STAGE_INPUT","this run predates region detection","run xl2ai refresh")
+        reg=cat.execute("""SELECT first_row,first_col,last_row,last_col,header_row,kind FROM _regions
+                           WHERE table_id=? AND region_no=?""",(tid,int(region_no))).fetchone()
+        if not reg:
+            n=cat.execute("SELECT COUNT(*) FROM _regions WHERE table_id=?",(tid,)).fetchone()[0]
+            raise Xl2aiError("E_STAGE_INPUT",f"no region {region_no} in {tid}",
+                             f"this table has {n} detected region(s); see query meta regions")
+        table_hdr=cat.execute("SELECT header_row FROM _tables WHERE table_id=?",(tid,)).fetchone()[0]
+        cols=cat.execute("""SELECT name,xl_col FROM _columns WHERE table_id=? AND xl_col BETWEEN ? AND ?
+                            ORDER BY position""",(tid,reg[1],reg[3])).fetchall()
+    r0,_,r1,_,hdr,kind=reg
+    if not cols:
+        return _envelope("region",[],[],started,cfg,evidence=[{"run_id":rid,"table_id":tid,"region":region_no}],
+                         hint="the region's columns hold no stored data columns")
+    lim=max(1,min(int(limit or cfg.ai["query_rows"]),cfg.ai["query_rows"]))
+    names=[c[0] for c in cols]
+    with _source_db(run_dir,db_rel) as src:
+        if hdr is not None and hdr!=table_hdr:
+            row=src.execute(f"SELECT {','.join(q(n) for n in names)} FROM {q(table)} WHERE _xl_row=?",(hdr,)).fetchone()
+            if row:
+                names_out=[str(v) if v is not None else n for v,n in zip(row,names)]
+            else:
+                names_out=names
+            start=hdr+1
+        else:
+            names_out=names
+            start=r0 if hdr is None else hdr+1
+        columns,rows,truncated=_run_capped(src,
+            f"SELECT _xl_row,{','.join(q(n) for n in names)} FROM {q(table)} WHERE _xl_row BETWEEN ? AND ? "
+            f"ORDER BY _xl_row LIMIT ?",(start,r1,lim+1),cfg,row_limit=lim)
+        total=src.execute(f"SELECT COUNT(*) FROM {q(table)} WHERE _xl_row BETWEEN ? AND ?",(start,r1)).fetchone()[0]
+    return _envelope("region",["_xl_row"]+names_out,rows,started,cfg,
+                     evidence=[{"run_id":rid,"source_id":sid,"sheet":sheet,"table_id":tid,"region":int(region_no),
+                                "xl_rows":[start,r1]}],
+                     total_rows=total,truncated=truncated,
+                     hint=f"region {region_no} ({kind}) of {sheet}; column names come from its own header row")
 
 
 def compare(cfg, kind=None, run_id=None):
@@ -375,6 +445,10 @@ def main(argv=None):
     a.add_argument("--group-by")
     m=sub.add_parser("meta")
     m.add_argument("section",choices=sorted(META_SECTIONS))
+    rg=sub.add_parser("region")
+    rg.add_argument("table")
+    rg.add_argument("region_no",type=int)
+    rg.add_argument("--limit",type=int)
     c=sub.add_parser("compare")
     c.add_argument("--kind")
     t=sub.add_parser("trace")
@@ -398,6 +472,8 @@ def main(argv=None):
             out=aggregate(cfg,args.table,args.column,args.op,args.group_by,args.run)
         elif args.cmd=="meta":
             out=meta(cfg,args.section,args.run)
+        elif args.cmd=="region":
+            out=region(cfg,args.table,args.region_no,args.limit,args.run)
         elif args.cmd=="compare":
             out=compare(cfg,args.kind,args.run)
         elif args.cmd=="trace":

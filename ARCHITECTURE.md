@@ -43,7 +43,7 @@ not in what exists: the earlier plan had a "price/volume/mix" phase. That belong
 
 | # | Risk | Impact | Planned fix |
 |---|---|---|---|
-| R1 | One wide table per sheet; multi-row headers and several tables per sheet are flattened | wrong/awkward schema for report-style sheets | region detection + multi-row headers (phase 2) |
+| R1 | One wide table per sheet; multi-row headers and several tables per sheet are flattened | wrong/awkward schema for report-style sheets | mitigated (0.11.0): regions and grouped headers are detected and recorded, `query region` reads one table back out; the stored identity is still one table per sheet |
 | R2 | Header detection is a fixed heuristic with no confidence or override | silent mis-detection | score + reasons stored in `_tables`; config override per sheet |
 | R3 | Table identity = sanitized sheet name | renamed/re-ordered sheets break change detection | stable `table_id` + rename detection by header fingerprint |
 | R4 | DB file name = file stem | `a/report.xlsx` and `b/report.xlsx` overwrite each other | run folder + `source_id` naming |

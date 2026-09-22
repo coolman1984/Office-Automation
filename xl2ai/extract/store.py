@@ -22,6 +22,11 @@ CREATE TABLE _verification (table_name TEXT, column_name TEXT, check_name TEXT, 
   sqlite_value REAL, ok INTEGER, note TEXT);
 CREATE TABLE _unsupported (scope TEXT, sheet_name TEXT, kind TEXT, count INTEGER, detail TEXT);
 CREATE TABLE _formulas (table_name TEXT, sql_name TEXT, has_formula INTEGER, sample_r1c1 TEXT);
+CREATE TABLE _regions (table_name TEXT, region_no INTEGER, first_row INTEGER, first_col INTEGER, last_row INTEGER,
+  last_col INTEGER, header_row INTEGER, kind TEXT, cells INTEGER, complete INTEGER);
+CREATE TABLE _formula_refs (table_name TEXT, sql_name TEXT, ref_workbook TEXT, ref_sheet TEXT, cells INTEGER,
+  sample TEXT);
+CREATE TABLE _header_groups (table_name TEXT, xl_col INTEGER, sql_name TEXT, path TEXT, method TEXT);
 """
 
 

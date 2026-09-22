@@ -14,6 +14,10 @@ dependencies = [
   "pywin32>=306; platform_system == 'Windows'"
 ]
 
+[project.optional-dependencies]
+direct = ["python-calamine>=0.3"]           # the direct (no-Excel) extraction engine
+test = ["python-calamine>=0.3", "openpyxl>=3.1"]
+
 [project.scripts]
 xl2ai = "xl2ai.cli:main"
 

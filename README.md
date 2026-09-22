@@ -13,7 +13,18 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 
 ## What works now
 
-- Excel COM extraction on Windows with a private Excel process, read-only open, crash/dialog handling and verification.
+- Two extraction engines, one output contract (`[extract] engine = "auto" | "excel" | "direct"`):
+  - **Excel**: COM extraction on Windows with a private Excel process, read-only open, crash/dialog handling and
+    verification by Excel itself. The only engine that opens rights-managed (DRM) workbooks.
+  - **Direct**: reads .xlsx/.xlsm/.xlsb/.xls itself (python-calamine), on any OS, no Excel needed, several times
+    faster on big files (1M rows x 10 columns, 57 MB .xlsx: ~55 s including full verification). For .xlsx/.xlsm
+    every column is verified by a second, independent reader of the sheet XML, which also captures every formula
+    and error cell. `auto` uses Excel where it can, otherwise direct.
+- Report-shaped sheets are described, not flattened blindly: several tables on one sheet (`query meta regions`,
+  `query region <table> <n>` reads one back out under its own header) and grouped multi-row headers
+  ("Plan" under "Q1") are detected and recorded.
+- Formula lineage: which sheet or other workbook each computed column pulls from (`query meta lineage`), shown
+  in `brief`, the context pack and the agent brief -- "this report is computed from Raw Sales".
 - Incremental refresh: unchanged trusted sources are reused without reopening Excel.
 - Run history, live-owner lock, promotion gate and retention. A failed refresh never replaces the last trusted run.
 - Stable source/table/column catalog.
@@ -42,10 +53,11 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 
 ## Install
 
-Python 3.11+ is required. Extraction additionally requires Windows and Microsoft Excel.
+Python 3.11+ is required. The Excel engine additionally requires Windows and Microsoft Excel; the direct engine
+runs anywhere.
 
 ```powershell
-python -m pip install -e .
+python -m pip install -e ".[direct]"      # the direct engine (python-calamine); drop [direct] for Excel-only
 xl2ai --help
 ```
 
@@ -158,9 +170,13 @@ The platform warns instead of pretending when workbook logic is not fully repres
 
 Still incomplete:
 
-- several logical tables inside one worksheet,
-- multi-row/complex headers with explicit region configuration,
-- full formula dependency capture,
+- several logical tables inside one worksheet are *detected and readable one by one*, but still stored as one wide
+  table per sheet (no config-driven re-cut yet),
+- grouped headers are recorded per column but do not rename columns,
+- formula lineage is at sheet level (which sheet/workbook a column pulls from), not cell-by-cell dependency; the
+  Excel engine sees one sample formula per column, the direct engine sees every formula,
+- the direct engine cannot open DRM-wrapped files, and on .xlsb/.xls cannot see formulas or error cells (it says
+  so as a `reader_limit` blind spot),
 - pivot definition/source logic,
 - Power Query / Data Model *semantics* (their presence is detected and reported as a blind spot; their internal logic is not read),
 - key-based row-level before/after values for confirmed keys,

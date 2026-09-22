@@ -20,7 +20,7 @@ STAGES = {
     "brief": ("xl2ai.brief", "main", "one-call orientation for a cold agent: readiness, gaps, next commands"),
     "agent-brief": ("xl2ai.agent_brief", "main", "write ai/agent_brief.md: plain-language tables, roles, grain, changes and definitions"),
     "sources": ("xl2ai.sources.inventory", "main", "list and fingerprint the configured source files"),
-    "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite via Excel COM, verified against Excel (stand-alone)"),
+    "extract": ("xl2ai.extract.pipeline", "main", "Excel workbooks -> SQLite, via Excel COM or directly without Excel (--engine), verified (stand-alone)"),
     "catalog": ("xl2ai.catalog", "main", "build stable source/table/column identities for a run"),
     "analyze": ("xl2ai.analyze", "main", "profile data, flag generic quality issues and infer candidate keys"),
     "semantics": ("xl2ai.semantics", "main", "infer column roles, units, table grain, time coverage and draft definitions"),

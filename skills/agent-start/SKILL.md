@@ -33,6 +33,10 @@ Each table carries its own `readiness`:
   (`xl2ai query meta quality` for the findings, `xl2ai query describe <table>` for the column-level detail).
 - **`not_ready`** — stored data did not verify against Excel. Do not use it; say so rather than answering anyway.
 
+Each table also carries `regions` (more than 1 = several tables in one sheet: read them with
+`xl2ai query region <table> <n>`, never aggregate the flattened wide table) and `feeds_from` (the sheets or
+workbooks its formulas pull from -- a report computed from another table is a view of it, not independent evidence).
+
 `gaps` is the complete list of reasons brief did not return exit code 0. Never proceed past a `not_ready` table or
 a `stale`/`not_promoted` gap by assuming the data is "probably fine" — the platform already checked and told you
 it is not sure.

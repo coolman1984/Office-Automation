@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## 0.11.0 - A second extraction engine, report-shaped sheets, formula lineage (2026-09-22)
+
+**No output change for existing Excel-engine projects except three new, additive extract tables** (`_regions`,
+`_header_groups`, `_formula_refs`, empty unless something is found) and their catalog counterparts plus
+`_lineage`. `[extract] engine` defaults to `auto`, which on a Windows+Excel machine is the Excel engine exactly
+as before, and its reuse fingerprint is unchanged, so unchanged workbooks are still reused, not re-extracted.
+`tests/golden/fingerprints.json` needs regenerating on Windows (`python tests/regen_golden.py`) because the extract
+schema gained tables -- still outstanding, like the two earlier schema additions.
+
+* **Direct engine** (`xl2ai/extract/direct.py`, `[extract] engine = "direct"`, `xl2ai extract --engine direct`):
+  reads .xlsx/.xlsm/.xlsb/.xls without Excel via python-calamine (optional extra: `pip install -e ".[direct]"`),
+  on any OS. It reuses the Excel engine's header detection, column typing, value conversion, preamble, naming and
+  structure code -- only the cell reading differs -- and writes the same database contract.
+  - Verification: for .xlsx/.xlsm every column's count and numeric sum, and the whole-sheet cell total, are checked
+    against a second, independent reader (a streaming byte-level scan of the sheet XML). For .xlsb/.xls the
+    per-column counts come from the reader's own grid and `_verification.note` says so; there is no whole-sheet
+    check there rather than a fake one.
+  - The same XML scan restores Excel error cells (NULL + `_cell_errors`, as the Excel engine does -- the reader
+    alone would show them as empty), captures every formula per column (`_formulas` + all referenced sheets in
+    `_formula_refs`), and detects Power Query, the Data Model, external links (resolved to file names), pivots and
+    charts from the package parts. On .xlsb/.xls a `reader_limit` blind spot states what could not be seen.
+  - DRM-wrapped files are refused with a clear reason (only Excel's rights agent can open them); nothing is written.
+  - Measured on a 57 MB .xlsx (1,000,000 rows x 10 columns): ~55 s end to end with all 17 checks passing, ~1.2 GB
+    peak with the default `cache_cells`; ~67 s with `cache_cells = 0` (streams twice instead of caching).
+  - `auto` = Excel engine when this machine can drive Excel, otherwise direct. `xl2ai doctor` reports which engine
+    is in use and whether python-calamine is installed.
+* **Several tables on one sheet** (`xl2ai/extract/regions.py`, both engines, no extra Excel calls): blocks
+  separated by >= 2 blank rows that start with a header-like row, or by an empty column whose two sides do not
+  share the same rows, are recorded in `_regions`. The sheet keeps its identity (still one stored table), is
+  marked `needs_review` with a `several_tables_in_sheet` gap in `brief`, and `xl2ai query region <table> <n>`
+  returns one region's rows named by that region's own header row.
+* **Grouped (multi-row) headers**: up to three label rows directly above the header, bounded by merged areas or
+  by label runs (a lone unmerged title is never spread over the header), recorded per column in `_header_groups`
+  ("Plan" under "Q1"), shown in `ai/agent_brief.md` and `query meta header_groups`. Column names are not rewritten.
+* **Formula lineage** (`xl2ai/lineage.py`, catalog stage): formula text is parsed for `Sheet!`, `'My Sheet'!`,
+  `[Book.xlsx]Sheet!`, path-qualified and `[n]`-indexed references; each is resolved to a table in this project
+  (same workbook, or another source matched by file name) or marked `external`/`unresolved`. Own-sheet references
+  are arithmetic, not lineage, and are skipped. Surfaced in `brief` (`feeds_from`, and a
+  `depends_on_unextracted` gap when a source is outside the project), the context pack ("Computed from") and the
+  agent brief. Always `inferred`; the Excel engine contributes one sample formula per column, the direct engine
+  every formula.
+* `query meta` gained `regions`, `header_groups`, `lineage` (older runs answer with an empty result and a hint to
+  refresh, never an error). `DQ_FORMULAS_VALUE_ONLY` now points at `query meta lineage`.
+* `[extract] engine` is validated (`auto|excel|direct`); a typo is a config error like every other key.
+
 ## 0.10.0 - Agent readiness, phase 6: the agent interface and staying fresh (2026-09-22)
 
 * Added `ai/agent_brief.md` (new `agent_brief` stage, `xl2ai agent-brief` standalone command): one plain-language

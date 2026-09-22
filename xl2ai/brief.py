@@ -55,6 +55,8 @@ def build_brief(cfg, run_id=None):
         has_row_flags = "_row_flags" in existing
         has_table_kind = "_table_kind" in existing
         has_grain = "_table_grain" in existing
+        has_regions = "_regions" in existing
+        has_lineage = "_lineage" in existing
         for tid, sid, sheet, table_name, rows in con.execute(
             "SELECT table_id,source_id,sheet_name,table_name,row_count FROM _tables ORDER BY table_id"):
             errors = con.execute(
@@ -78,10 +80,21 @@ def build_brief(cfg, run_id=None):
             if has_grain:
                 row = con.execute("SELECT status FROM _table_grain WHERE table_id=?", (tid,)).fetchone()
                 grain_status = row[0] if row else None
+            regions = 0
+            if has_regions:
+                regions = con.execute("SELECT COUNT(*) FROM _regions WHERE table_id=? AND kind='table'",
+                                      (tid,)).fetchone()[0]
+            feeds_from, external_refs = [], 0
+            if has_lineage:
+                for kind_, book, ref_sheet, target, status_ in con.execute(
+                        "SELECT DISTINCT ref_kind, ref_workbook, ref_sheet, target_table_id, status FROM _lineage "
+                        "WHERE table_id=? ORDER BY ref_workbook, ref_sheet", (tid,)):
+                    feeds_from.append({"table_id": target, "workbook": book, "sheet": ref_sheet, "status": status_})
+                    external_refs += status_ != "resolved"
             mismatches = verify_mismatches.get(sid, 0)
             if mismatches:
                 readiness = "not_ready"
-            elif errors or blind_spots or totals_rows:
+            elif errors or blind_spots or totals_rows or regions > 1:
                 readiness = "needs_review"
             else:
                 readiness = "ready"
@@ -89,7 +102,9 @@ def build_brief(cfg, run_id=None):
                                    "rows": int(rows), "kind": kind, "grain_status": grain_status,
                                    "readiness": readiness, "quality_errors": errors,
                                    "quality_warnings": warnings, "blind_spots": blind_spots,
-                                   "totals_rows": totals_rows, "verify_mismatches": mismatches})
+                                   "totals_rows": totals_rows, "verify_mismatches": mismatches,
+                                   "regions": regions, "feeds_from": feeds_from,
+                                   "unresolved_sources": external_refs})
 
         rule_errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
         rule_failures = con.execute(
@@ -124,7 +139,18 @@ def build_brief(cfg, run_id=None):
             out["gaps"].append({"kind": "totals_row_in_data", "table_id": t["table_id"],
                                 "message": f"{t['totals_rows']} totals/subtotal row(s) inside the data; exclude "
                                            "them explicitly before summing (see query meta row_flags)"})
+        if t["regions"] > 1:
+            out["gaps"].append({"kind": "several_tables_in_sheet", "table_id": t["table_id"],
+                                "message": f"this sheet holds {t['regions']} separate tables that were stored as one "
+                                           "wide table; read them one at a time (see query meta regions, "
+                                           "query region)"})
     for t in out["tables"]:
+        if t.get("unresolved_sources"):
+            names = ", ".join(sorted({(f["workbook"] + "!" if f["workbook"] else "") + (f["sheet"] or "")
+                                      for f in t["feeds_from"] if f["status"] != "resolved"}))
+            out["gaps"].append({"kind": "depends_on_unextracted", "table_id": t["table_id"],
+                                "message": f"formulas here pull from data that is not part of this project ({names}); "
+                                           "those numbers cannot be traced further (see query meta lineage)"})
         if t.get("grain_status") == "unknown":
             out["gaps"].append({"kind": "grain_unknown", "table_id": t["table_id"],
                                 "message": "no column or combination uniquely identifies a row with high "
@@ -158,6 +184,11 @@ def _render(out):
             flags.append(f"{t['blind_spots']} blind spot(s)")
         if t["totals_rows"]:
             flags.append(f"{t['totals_rows']} totals row(s)")
+        if t.get("regions", 0) > 1:
+            flags.append(f"{t['regions']} tables in one sheet")
+        if t.get("feeds_from"):
+            flags.append("computed from " + ", ".join(sorted({(f["workbook"] + "!" if f["workbook"] else "")
+                                                              + (f["sheet"] or "") for f in t["feeds_from"]})))
         flag_text = f" [{', '.join(flags)}]" if flags else ""
         kind_text = f" ({t['kind']})" if t.get("kind") else ""
         lines.append(f"  {t['readiness']:<12} {t['table_id']:<40}{kind_text} {t['rows']:>10,} rows{flag_text}")
