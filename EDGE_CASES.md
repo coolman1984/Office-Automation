@@ -97,7 +97,7 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | new / removed / renamed sheets and columns between runs | planned P2 (ids), P6 (diff) |
 | column type changes, new categories, new periods/versions | planned P6 |
 | row-level changes without a key | planned P6 (row-hash multiset) |
-| several unrelated files; several related files; same file different versions | partial (multi-source refresh built; relations planned P5) |
+| several unrelated files; several related files; same file different versions | covered [test_semantics.py:TestDuplicateDetection] for exact schema+content duplicates across files (`_duplicate_candidates`); relationship inference across files remains built separately (`relations.py`) |
 | unchanged source between refreshes: do not reopen Excel; reuse only trusted identical extraction | covered [test_incremental_refresh.py] |
 | relationship discovery: true FK, false-positive small domains, composite keys | planned P5 |
 
@@ -121,3 +121,14 @@ Status: planned P4.
 Pack under token budget on every fixture; pack determinism (same input, same bytes); delta pack; query caps;
 read-only enforcement; SQL injection / multi-statement / PRAGMA / ATTACH refused; tool errors are machine-readable;
 cold-agent Q&A evaluation. Status: planned P6-P7.
+
+## J. Semantic layer (column roles, grain, units, auto-drafted definitions)
+
+| Case | Status |
+|---|---|
+| column role classification (identifier/date/money/quantity/percentage/category/code/boolean/free_text/geo/contact) | covered [test_semantics.py:TestColumnRoleClassification], always `inferred` with method + reasons |
+| unit/currency detection | covered from column name only (EGP/USD/EUR/SAR + symbols, percent) [test_semantics.py:TestUnitCurrencyDetection]; from cell number formats remains planned P4 (needs format-string parsing this platform does not yet do reliably) |
+| table grain detection | covered [test_semantics.py:test_grain_detected_from_unique_id_column]; explicitly `unknown` (not guessed) when no key reaches 90% uniqueness [test_grain_unknown_when_no_strong_key] |
+| time coverage per table | covered [test_semantics.py:test_time_coverage_captured] |
+| auto-drafted table/column definitions | covered [test_semantics.py:test_auto_definitions_drafted], `origin=auto`/`status=inferred`; promotion to `confirmed` only via a pack (see `BUSINESS_RULES.md`) |
+| cross-file duplicate/version detection | covered for identical schema + row-hash overlap [test_semantics.py:TestDuplicateDetection]; fuzzy/partial-overlap detection remains planned |

@@ -165,7 +165,7 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
 
 
 META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported",
-                 "table_kind", "row_flags"}
+                 "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates"}
 
 
 def meta(cfg, section, run_id=None):
@@ -208,6 +208,18 @@ def meta(cfg, section, run_id=None):
         elif section=="row_flags":
             cur=cat.execute("""SELECT table_id,xl_row,flag,detail
                                FROM _row_flags ORDER BY table_id,xl_row""")
+        elif section=="column_roles":
+            cur=cat.execute("""SELECT column_id,table_id,role,confidence,method,reasons,unit,currency
+                               FROM _column_roles ORDER BY table_id,column_id""")
+        elif section=="grain":
+            cur=cat.execute("""SELECT table_id,columns_json,description,status,confidence,method
+                               FROM _table_grain ORDER BY table_id""")
+        elif section=="time_coverage":
+            cur=cat.execute("""SELECT table_id,column_id,min_value,max_value
+                               FROM _time_coverage ORDER BY table_id,column_id""")
+        elif section=="duplicates":
+            cur=cat.execute("""SELECT table_id_a,table_id_b,method,score,evidence
+                               FROM _duplicate_candidates ORDER BY score DESC""")
         else:
             cur=cat.execute("""SELECT table_id,columns_json,uniqueness,null_rate,status,method,score
                                FROM _keys ORDER BY status DESC,score DESC,id""")
@@ -219,6 +231,9 @@ def meta(cfg, section, run_id=None):
         "quality":{"examples"},
         "keys":{"columns_json"},
         "table_kind":{"reasons"},
+        "column_roles":{"reasons"},
+        "grain":{"columns_json"},
+        "duplicates":{"evidence"},
     }.get(section,set())
     if json_cols:
         indexes={name:i for i,name in enumerate(columns)}

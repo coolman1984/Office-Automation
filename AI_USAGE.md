@@ -47,6 +47,10 @@ xl2ai query meta definitions
 xl2ai query meta unsupported
 xl2ai query meta table_kind
 xl2ai query meta row_flags
+xl2ai query meta column_roles
+xl2ai query meta grain
+xl2ai query meta time_coverage
+xl2ai query meta duplicates
 xl2ai query trace <table-id> 25
 ```
 
@@ -78,6 +82,12 @@ not knowing about it.
 
 Before summing or averaging a column, check `query meta row_flags` for `totals_candidate` rows in that table and
 exclude them by `_xl_row` -- a totals/subtotal row left inside an aggregate silently doubles the answer.
+
+Before aggregating a table at all, check `query meta grain`. If its `status` is `unknown`, say so and ask what one
+row represents rather than assuming -- `SUM`/`COUNT` over a table with an unclear grain can double- or
+under-count depending on a fact nobody has confirmed yet. Column roles (`query meta column_roles`) are `inferred`
+guesses about what a column *means* (money, a category, an identifier, ...); treat them the same as any other
+inferred fact -- useful for orientation, not a substitute for a pack's confirmed definition.
 
 ## Token discipline
 

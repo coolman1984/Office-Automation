@@ -78,3 +78,14 @@ and that rule has `severity = "error"`.
 ## Trust
 
 Inferred keys/relationships remain inferred. Declaring them in a pack changes their status to confirmed. That distinction is intentional and is exposed to AI-facing outputs.
+
+## Confirming an auto-drafted definition
+
+Every refresh drafts a plain-language definition for each table (grain + time coverage) and for money/quantity/
+percentage columns with a detected unit, and stores it in `_dictionary` with `status = "inferred"`,
+`origin = "auto"` (see `xl2ai query meta definitions`). These are a starting point, not a decision: an agent must
+still say "not confirmed yet" when asked for a definitive meaning. A human confirms one by adding the equivalent
+`[[term]]` entry to a pack with the agreed wording; the pack's entry (`status = "confirmed"`, `origin = "pack"`)
+is what future runs and agents should treat as authoritative. The same applies to a column's inferred role
+(`query meta column_roles`) and a table's inferred grain (`query meta grain`): confirm the ones that matter with
+`[[key]]`/`[[term]]` entries so later agents stop seeing "inferred" and start seeing "confirmed".

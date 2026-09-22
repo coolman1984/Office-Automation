@@ -54,6 +54,7 @@ def build_brief(cfg, run_id=None):
         has_unsupported = "_unsupported" in existing
         has_row_flags = "_row_flags" in existing
         has_table_kind = "_table_kind" in existing
+        has_grain = "_table_grain" in existing
         for tid, sid, sheet, table_name, rows in con.execute(
             "SELECT table_id,source_id,sheet_name,table_name,row_count FROM _tables ORDER BY table_id"):
             errors = con.execute(
@@ -73,6 +74,10 @@ def build_brief(cfg, run_id=None):
             if has_table_kind:
                 row = con.execute("SELECT kind FROM _table_kind WHERE table_id=?", (tid,)).fetchone()
                 kind = row[0] if row else None
+            grain_status = None
+            if has_grain:
+                row = con.execute("SELECT status FROM _table_grain WHERE table_id=?", (tid,)).fetchone()
+                grain_status = row[0] if row else None
             mismatches = verify_mismatches.get(sid, 0)
             if mismatches:
                 readiness = "not_ready"
@@ -81,10 +86,10 @@ def build_brief(cfg, run_id=None):
             else:
                 readiness = "ready"
             out["tables"].append({"table_id": tid, "source_id": sid, "sheet": sheet, "table_name": table_name,
-                                   "rows": int(rows), "kind": kind, "readiness": readiness,
-                                   "quality_errors": errors, "quality_warnings": warnings,
-                                   "blind_spots": blind_spots, "totals_rows": totals_rows,
-                                   "verify_mismatches": mismatches})
+                                   "rows": int(rows), "kind": kind, "grain_status": grain_status,
+                                   "readiness": readiness, "quality_errors": errors,
+                                   "quality_warnings": warnings, "blind_spots": blind_spots,
+                                   "totals_rows": totals_rows, "verify_mismatches": mismatches})
 
         rule_errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
         rule_failures = con.execute(
@@ -119,6 +124,11 @@ def build_brief(cfg, run_id=None):
             out["gaps"].append({"kind": "totals_row_in_data", "table_id": t["table_id"],
                                 "message": f"{t['totals_rows']} totals/subtotal row(s) inside the data; exclude "
                                            "them explicitly before summing (see query meta row_flags)"})
+    for t in out["tables"]:
+        if t.get("grain_status") == "unknown":
+            out["gaps"].append({"kind": "grain_unknown", "table_id": t["table_id"],
+                                "message": "no column or combination uniquely identifies a row with high "
+                                           "confidence; do not assume what one row represents (see query meta grain)"})
 
     out["changes_since_previous"] = changes
     out["next_commands"] = ["xl2ai query schema"]

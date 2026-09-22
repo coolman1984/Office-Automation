@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## 0.8.0 - Agent readiness, phase 4: the semantic layer (2026-09-22)
+
+**Extraction database schema unchanged** in this phase; only `catalog.db` gained tables (additive, computed
+entirely from data already in the catalog -- no re-extraction, no golden-fingerprint impact).
+
+* Added column-role classification (`xl2ai/semantics.py`, new `semantics` stage between `analyze` and `rules`):
+  `identifier | date | money | quantity | percentage | category | code | boolean | free_text | geo | contact`,
+  a small explicit rule set over signals `analyze` already computed (uniqueness, type, name tokens), always
+  `inferred` with a method and reasons -- never a model call, never presented as confirmed. New `_column_roles`.
+* Added unit/currency detection from column names only (EGP/USD/EUR/SAR and common symbols, plus "percent"),
+  deliberately not from values -- this platform does not yet parse Excel number formats reliably enough for that.
+* Added table-grain detection (`_table_grain`): derives "one row per X, identified by columns Y" from the
+  strongest confirmed/candidate key, or explicitly states the grain is unknown when no key reaches 90% uniqueness
+  -- an unclear grain is stated as unclear, never guessed, since it is the single fact that makes or breaks any
+  aggregation run against the table.
+* Added time-coverage detection (`_time_coverage`): min/max of every date/datetime column already profiled.
+* Added auto-drafted definitions: one sentence per table (grain + time coverage) and a short note per
+  money/quantity/percentage column with a detected unit, written into `_dictionary` with `origin='auto'`,
+  `status='inferred'` -- the raw material for a human to confirm via a pack (see `BUSINESS_RULES.md`).
+* Added cross-file duplicate/version detection (`_duplicate_candidates`): tables with an identical schema
+  fingerprint from different source files are flagged, scored higher when their row-hash sets actually overlap
+  (already computed by `analyze`'s row-multiset fingerprinting) -- catches "this is last month's copy of that
+  file" without a human having to notice it.
+* `xl2ai query meta column_roles/grain/time_coverage/duplicates` expose all of this directly. The context pack's
+  `tables[]` entries gained `grain`. `xl2ai brief` reports `grain_unknown` as a gap (informational: it does not
+  by itself downgrade a table's readiness, since an unclear grain is a property of the data, not a defect in it).
+
 ## 0.7.0 - Agent readiness, phase 3: structural truth (2026-09-22)
 
 **Extraction database schema change**: `_extraction_log` gained `header_confidence`/`header_reasons` columns.

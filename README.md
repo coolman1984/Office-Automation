@@ -30,6 +30,12 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Installable package and `xl2ai` command.
 - Live, step-by-step run view (`xl2ai watch`) and post-run failure diagnosis (`xl2ai diagnose`), both usable without Excel via `--demo`.
 - One-call cold-agent orientation (`xl2ai brief`): readiness per table, explicit gaps, ordered next commands.
+- Semantic layer (`xl2ai semantics`): column roles (money/quantity/date/identifier/category/...), unit/currency
+  detection, table grain ("one row per X, identified by Y" -- or explicitly "unknown"), time coverage, and
+  auto-drafted table/column definitions ready for human confirmation via a pack.
+- Reports on what it could not fully read: Power Query, the Data Model, external links, stale-calculation,
+  totals rows mixed into data, and unread chart sources -- surfaced as `blind_spots` in the AI context pack and
+  as `gaps` in `xl2ai brief`, never silently treated as complete.
 
 ## Install
 
@@ -72,6 +78,8 @@ xl2ai status --deep
 xl2ai refresh
 xl2ai report
 xl2ai query schema
+xl2ai query meta grain
+xl2ai query meta column_roles
 xl2ai query describe <table-id>
 xl2ai query sample <table-id>
 xl2ai query aggregate <table-id> amount --op sum --group-by department

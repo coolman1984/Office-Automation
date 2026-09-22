@@ -36,6 +36,21 @@ CREATE TABLE _row_flags (
   table_id TEXT NOT NULL, xl_row INTEGER NOT NULL, flag TEXT NOT NULL, detail TEXT,
   PRIMARY KEY(table_id, xl_row, flag)
 );
+CREATE TABLE _column_roles (
+  column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, role TEXT NOT NULL, confidence REAL, method TEXT,
+  reasons TEXT, unit TEXT, currency TEXT
+);
+CREATE TABLE _table_grain (
+  table_id TEXT PRIMARY KEY, columns_json TEXT, description TEXT NOT NULL, status TEXT NOT NULL,
+  confidence REAL, method TEXT
+);
+CREATE TABLE _time_coverage (
+  table_id TEXT NOT NULL, column_id TEXT NOT NULL, min_value TEXT, max_value TEXT,
+  PRIMARY KEY(table_id, column_id)
+);
+CREATE TABLE _duplicate_candidates (
+  id TEXT PRIMARY KEY, table_id_a TEXT NOT NULL, table_id_b TEXT NOT NULL, method TEXT, score REAL, evidence TEXT
+);
 CREATE TABLE _columns (
   column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT NOT NULL,
   original_header TEXT, xl_col INTEGER, xl_col_letter TEXT, sql_type TEXT, kind TEXT,

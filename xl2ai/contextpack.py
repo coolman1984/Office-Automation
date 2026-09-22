@@ -70,7 +70,8 @@ def _render_markdown(p):
     for t in p["tables"]:
         cols = ", ".join(f"{c['h']}={c['name']}:{c['type']}" for c in t.get("columns", []))
         kind_tag = f" | kind={t['kind']}" if t.get("kind") else ""
-        lines.append(f"- {t['h']} {t['table_id']} | {t['source_id']} / {t['sheet']} | {t['rows']} rows{kind_tag}" +
+        grain_tag = f" | grain: {t['grain']}" if t.get("grain") else ""
+        lines.append(f"- {t['h']} {t['table_id']} | {t['source_id']} / {t['sheet']} | {t['rows']} rows{kind_tag}{grain_tag}" +
                      (f" | {cols}" if cols else ""))
     if p.get("relationships"):
         lines += ["", "## Relationships"]
@@ -140,6 +141,12 @@ def build_context_pack(cfg, run_id, catalog_path=None):
         kinds = {}
         if has_table_kind:
             kinds = {r[0]: r[1] for r in con.execute("SELECT table_id,kind FROM _table_kind").fetchall()}
+        has_grain = con.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_table_grain'").fetchone()[0]
+        grains = {}
+        if has_grain:
+            grains = {r[0]: (r[1], r[2]) for r in con.execute(
+                "SELECT table_id,status,description FROM _table_grain").fetchall()}
 
         table_rows = con.execute("""SELECT table_id,source_id,sheet_name,row_count,column_count
                                     FROM _tables ORDER BY table_id""").fetchall()
@@ -149,8 +156,10 @@ def build_context_pack(cfg, run_id, catalog_path=None):
             handles[tid] = h
             cols = con.execute("""SELECT position,name,sql_type FROM _columns
                                   WHERE table_id=? ORDER BY position""", (tid,)).fetchall()
+            grain_status, grain_desc = grains.get(tid, (None, None))
             item = {"h": h, "table_id": tid, "source_id": sid, "sheet": sheet,
                     "rows": int(rows), "cols": int(ncols), "kind": kinds.get(tid),
+                    "grain_status": grain_status, "grain": grain_desc,
                     "columns": [{"h": f"{h}.c{p}", "name": n, "type": typ} for p,n,typ in cols]}
             if not _add_budgeted(payload, "tables", item, budget_tokens, omitted, "tables", state):
                 skinny = dict(item)

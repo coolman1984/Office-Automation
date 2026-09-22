@@ -27,6 +27,10 @@ filter/group-by instead of assuming you saw everything.
 | "What couldn't the platform read?" | `xl2ai query meta unsupported` | Power Query, Data Model, external links, stale-calculation, unread charts -- also summarized in `brief`'s `gaps` |
 | "Is this sheet actually a data table?" | `xl2ai query meta table_kind` | `data\|notes\|report\|dashboard\|empty`, always `inferred` with reasons -- a `report`/`dashboard` sheet may not aggregate the way a plain data table would |
 | "Are there totals rows mixed into the data?" | `xl2ai query meta row_flags` | `_xl_row`-level flags (`totals_candidate`); exclude these rows explicitly before summing a column |
+| "What does this column actually mean?" | `xl2ai query meta column_roles` | `identifier\|date\|money\|quantity\|percentage\|category\|code\|boolean\|free_text\|geo\|contact`, with unit/currency where detected -- always `inferred`, never treat as a confirmed definition |
+| "What does one row of this table represent?" | `xl2ai query meta grain` | if `status=unknown`, say so and do not aggregate as if a row's meaning were settled |
+| "What date range does this table cover?" | `xl2ai query meta time_coverage` | min/max per date column |
+| "Is this the same data as another file?" | `xl2ai query meta duplicates` | schema + row-hash-overlap based; a high score means "likely a copy", not proof |
 | "What changed since last time?" | `xl2ai query compare [--kind schema\|volume\|value\|row\|category\|distribution\|kpi]` | already computed; do not recompute by diffing samples yourself |
 | "Where did this row/value come from?" | `xl2ai query trace <table> <xl_row>` | returns the exact Excel row; use this before asserting provenance |
 | "Something not covered above" | `xl2ai query sql <source_id> "SELECT ..."` | single SELECT/WITH only, read-only, capped, authorizer-enforced |

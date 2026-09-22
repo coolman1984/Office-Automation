@@ -173,6 +173,16 @@ def stage_analyze(run, st, cfg, ctx):
         st.detail("candidate_keys", con.execute("SELECT COUNT(*) FROM _keys").fetchone()[0])
 
 
+def stage_semantics(run, st, cfg, ctx):
+    from .semantics import build_semantics
+    path = build_semantics(cfg, run.id, ctx.get("catalog"))
+    with ro_connection(path) as con:
+        st.detail("roles_classified", con.execute("SELECT COUNT(*) FROM _column_roles").fetchone()[0])
+        unconfirmed = con.execute("SELECT COUNT(*) FROM _table_grain WHERE status='unknown'").fetchone()[0]
+        st.detail("tables_with_unknown_grain", unconfirmed)
+        st.detail("duplicate_candidates", con.execute("SELECT COUNT(*) FROM _duplicate_candidates").fetchone()[0])
+
+
 def stage_catalog(run, st, cfg, ctx):
     from .catalog import build_catalog
     path = build_catalog(cfg, run.id, run.m)
@@ -247,8 +257,8 @@ def stage_extract(run, st, cfg, ctx):
 
 
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
-          ("analyze", stage_analyze), ("rules", stage_rules), ("relations", stage_relations),
-          ("changes", stage_changes), ("audit", stage_audit),
+          ("analyze", stage_analyze), ("semantics", stage_semantics), ("rules", stage_rules),
+          ("relations", stage_relations), ("changes", stage_changes), ("audit", stage_audit),
           ("contextpack", stage_contextpack), ("report", stage_report))
 # rules runs before relations: pack-confirmed keys must exist in `_keys` before relation inference can use them
 # as trusted parent candidates (see relations.infer_relations), not just generic uniqueness-inferred ones.

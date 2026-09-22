@@ -75,6 +75,7 @@ xl2ai/                      PLATFORM: no domain knowledge, ever
   schema/    table registry, schema fingerprints, drift, rename detection
   keys/      candidate (composite) keys
   relations/ inclusion + name/type similarity; status inferred|confirmed|rejected
+  semantics.py column roles, unit/currency, table grain, time coverage, auto-drafted definitions, duplicate hints
   dictionary/ persistent meanings/aliases/units; auto-drafts marked inferred
   formulas/  formula patterns, dependencies, reference graph
   rules/     registry + engine: declarative checks, reconciliations, calculators from packs

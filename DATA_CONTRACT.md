@@ -56,6 +56,10 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_formulas` [built] | column_id, table_id, has_formula, sample_r1c1 |
 | `_table_kind` [built] | table_id, kind (`data\|notes\|report\|dashboard\|empty`), confidence, method, reasons -- always `inferred` |
 | `_row_flags` [built] | table_id, xl_row, flag (`totals_candidate`), detail -- label-matched, never value-sum-matched |
+| `_column_roles` [built] | column_id, table_id, role (`identifier\|date\|money\|quantity\|percentage\|category\|code\|boolean\|free_text\|geo\|contact`), confidence, method, reasons, unit, currency |
+| `_table_grain` [built] | table_id, columns_json, description, status (`inferred\|confirmed\|unknown`), confidence, method |
+| `_time_coverage` [built] | table_id, column_id, min_value, max_value |
+| `_duplicate_candidates` [built] | id, table_id_a, table_id_b, method, score, evidence -- cross-file, never same-workbook |
 
 ## 4. Run manifest [phase 1] `manifest.json`
 
