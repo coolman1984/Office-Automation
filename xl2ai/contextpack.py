@@ -97,6 +97,10 @@ def _render_markdown(p):
         lines += ["", "## Data-quality warnings"]
         for d in p["quality"]:
             lines.append(f"- {d['severity']} {d['code']} | {d['subject']} | {d['message']}")
+    if p.get("blind_spots"):
+        lines += ["", "## Blind spots (could not be fully read)"]
+        for b in p["blind_spots"]:
+            lines.append(f"- [{b['scope']}] {b['subject']} | {b['kind']} ({b['count']}) | {b['detail']}")
     if p.get("omitted"):
         lines += ["", "## Omitted to stay inside budget"]
         for o in p["omitted"]:
@@ -114,7 +118,7 @@ def build_context_pack(cfg, run_id, catalog_path=None):
         budget_tokens = int(cfg.ai["context_tokens"])
         payload = {"contract_version": "1.0", "run_id": run_id, "sources": [], "tables": [],
                    "relationships": [], "definitions": [], "kpis": [], "rules": [], "changes": [],
-                   "quality": [], "warnings": [], "omitted": []}
+                   "quality": [], "blind_spots": [], "warnings": [], "omitted": []}
         omitted = {}
         base_text = _compact_json(payload)
         base_ascii = sum(ord(ch) < 128 for ch in base_text)
@@ -192,10 +196,21 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                           {"code": code, "severity": severity, "subject": subject, "message": message},
                           budget_tokens, omitted, "quality", state)
 
+        has_unsupported = con.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_unsupported'").fetchone()[0]
+        if has_unsupported:
+            for scope,source_id,table_id,kind,count,detail in con.execute(
+                "SELECT scope,source_id,table_id,kind,count,detail FROM _unsupported ORDER BY scope,kind"):
+                subject = handles.get(table_id) if table_id else source_id
+                _add_budgeted(payload, "blind_spots",
+                              {"scope": scope, "subject": subject, "kind": kind, "count": int(count or 0),
+                               "detail": detail},
+                              budget_tokens, omitted, "blind_spots", state)
+
         use = {"sources":"query schema","tables":"query schema","tables_without_columns":"query describe",
                "columns":"query describe","relationships":"query meta relationships",
                "definitions":"query meta definitions","kpis":"query meta kpis","rules":"query meta rules",
-               "changes":"query compare","quality":"query meta quality"}
+               "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief"}
         payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
                               for k,v in sorted(omitted.items()) if v]
         base = dict(payload)

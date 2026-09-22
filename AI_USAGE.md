@@ -6,6 +6,17 @@ Do not give the model the raw workbook or whole SQLite tables unless a human exp
 
 Use the smallest evidence tier that answers the question.
 
+## Tier -1: is this run safe to use at all
+
+```powershell
+xl2ai brief
+```
+
+Run this before reading anything else. It returns a per-table readiness verdict (`ready` / `needs_review` /
+`not_ready`), an explicit `gaps` list, and ordered next commands. A `not_ready` table (failed verification) must
+not be used. A `needs_review` table (quality errors, or a blind spot such as Power Query / Data Model / an
+external link / a stale-calculation flag / an unread chart) can be used, but the gap must be named in the answer.
+
 ## Tier 0: orientation
 
 Read:
@@ -33,6 +44,7 @@ xl2ai query compare --kind row
 xl2ai query meta relationships
 xl2ai query meta quality
 xl2ai query meta definitions
+xl2ai query meta unsupported
 xl2ai query trace <table-id> 25
 ```
 
@@ -56,6 +68,11 @@ A good AI answer should distinguish:
 - raw sampled evidence.
 
 When a definition is missing, the correct answer is “definition not confirmed yet”, not an invented interpretation.
+
+When a table has a blind spot (`query meta unsupported`, or `brief`'s `gaps`), mention it in the answer if the
+question touches that table's numbers -- a workbook whose real logic lives in Power Query or the Data Model can
+have extracted values that no longer match the source. Silence about a known blind spot is treated the same as
+not knowing about it.
 
 ## Token discipline
 

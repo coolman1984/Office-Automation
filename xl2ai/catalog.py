@@ -72,7 +72,15 @@ CREATE TABLE _kpi_results (
 CREATE TABLE _changes (
   id TEXT PRIMARY KEY, kind TEXT, severity TEXT, subject TEXT, before_value TEXT, after_value TEXT, evidence TEXT
 );
+CREATE TABLE _unsupported (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, table_id TEXT, scope TEXT, sheet_name TEXT, kind TEXT,
+  count INTEGER, detail TEXT
+);
+CREATE TABLE _formulas (
+  column_id TEXT PRIMARY KEY, table_id TEXT NOT NULL, has_formula INTEGER, sample_r1c1 TEXT
+);
 CREATE INDEX idx_columns_table ON _columns(table_id);
+CREATE INDEX idx_unsupported_table ON _unsupported(table_id);
 CREATE INDEX idx_tables_source ON _tables(source_id);
 CREATE INDEX idx_dq_table ON _dq_findings(table_id);
 CREATE INDEX idx_rel_from ON _relationships(from_column);
@@ -138,10 +146,13 @@ def build_catalog(cfg, run_id, manifest=None):
                          rec["db"], int(bool(rec.get("reused"))), rec.get("reused_from_run")))
             srcdb = os.path.join(run_dir, rec["db"].replace("/", os.sep))
             with ro_connection(srcdb) as src:
+                src_tables = {r[0] for r in src.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
                 logs = src.execute("""SELECT sheet_name, table_name, data_rows, columns, header_row, visibility
                                       FROM _extraction_log
                                       WHERE status='extracted' AND table_name IS NOT NULL
                                       ORDER BY sheet_index""").fetchall()
+                sheet_to_table = {}
                 for sheet_name, table_name, rows, ncols, header_row, visibility in logs:
                     col_rows = src.execute("""SELECT position, sql_name, original_header, xl_col, xl_col_letter,
                                                      sql_type, kind, non_null, error_cells
@@ -151,15 +162,33 @@ def build_catalog(cfg, run_id, manifest=None):
                              "error_cells": r[8]} for r in col_rows]
                     fp = _schema_fingerprint(cols)
                     table_id = _table_id(sid, sheet_name)
+                    sheet_to_table[sheet_name] = table_id
                     con.execute("INSERT INTO _tables VALUES (?,?,?,?,?,?,?,?,?,?)",
                                 (table_id, sid, sheet_name, table_name, rec["db"], int(rows or 0), int(ncols or len(cols)),
                                  header_row, visibility, fp))
+                    col_ids = {}
                     for c in cols:
                         column_id = _column_id(table_id, c["sql_name"])
+                        col_ids[c["sql_name"]] = column_id
                         con.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                     (column_id, table_id, int(c["position"]), c["sql_name"], c["original_header"],
                                      c["xl_col"], c["xl_col_letter"], c["sql_type"], c["kind"],
                                      c["non_null"], c["error_cells"]))
+                    if "_formulas" in src_tables:
+                        for sql_name, has_formula, sample in src.execute(
+                            "SELECT sql_name,has_formula,sample_r1c1 FROM _formulas WHERE table_name=?",
+                            (table_name,)).fetchall():
+                            cid = col_ids.get(sql_name)
+                            if cid:
+                                con.execute("INSERT OR REPLACE INTO _formulas VALUES (?,?,?,?)",
+                                            (cid, table_id, int(has_formula), sample))
+                if "_unsupported" in src_tables:
+                    for scope, sheet_n, kind, count, detail in src.execute(
+                        "SELECT scope,sheet_name,kind,count,detail FROM _unsupported").fetchall():
+                        table_id = sheet_to_table.get(sheet_n) if scope == "sheet" else None
+                        uid = hashlib.sha1(f"{sid}|{scope}|{sheet_n}|{kind}|{detail}".encode()).hexdigest()[:20]
+                        con.execute("INSERT OR REPLACE INTO _unsupported VALUES (?,?,?,?,?,?,?,?)",
+                                    (uid, sid, table_id, scope, sheet_n, kind, int(count or 0), detail))
         con.commit()
         con.execute("PRAGMA optimize")
     finally:

@@ -32,8 +32,9 @@ additive = minor, breaking = major (a major bump requires a migration note in `C
 | `_cell_errors`, `_sheet_preamble`, `_merged_areas` [built] | as named |
 | `_verification` [built] | table_name, column_name, check_name (`counta|sum|cells_total`), excel_value, sqlite_value, ok (1/0/NULL), note |
 | `_tables` [phase 2] | table_id, sheet, region, header_rows[], header_score, header_reasons, source (`detected|config`), fingerprint |
-| `_formulas` [phase 3] | table_name, xl_col, pattern_r1c1, first_row, last_row, n_cells (run-length patterns) |
-| `_pivots`, `_names`, `_unsupported` [phase 3] | pivot definitions, defined names, content the tool cannot read (Data Model, Power Query, external links) |
+| `_formulas` [built, per-column only] | table_name, sql_name, has_formula, sample_r1c1 (one sample per column; full run-length R1C1 patterns remain phase 3) |
+| `_unsupported` [built] | scope (`workbook`\|`sheet`), sheet_name, kind (`power_query`\|`data_model`\|`external_link`\|`stale_calculation`\|`chart`), count, detail |
+| `_pivots`, `_names` [phase 3] | pivot definitions, defined names (pivot *output* and formula *values* are already extracted; their definitions are not) |
 
 Invariants (checked by `_verification`): stored cells == Excel `COUNTA` of the whole sheet; per-column non-null and
 numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes: 0 ok, 1 file failed, 2 some sheets failed, 3 verification mismatch.
@@ -50,6 +51,8 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_rule_results` | rule_id, pack, pack_version, status (`pass|fail|error|skipped`), expected, actual, tolerance, evidence |
 | `_kpi_results` | kpi_id, value, unit, dims, definition_ref, evidence |
 | `_changes` | kind (`schema|volume|value|row|category|distribution|kpi|source|baseline`), severity, subject, before, after, evidence |
+| `_unsupported` [built] | source_id, table_id (NULL for workbook-scope findings), scope, sheet_name, kind, count, detail |
+| `_formulas` [built] | column_id, table_id, has_formula, sample_r1c1 |
 
 ## 4. Run manifest [phase 1] `manifest.json`
 

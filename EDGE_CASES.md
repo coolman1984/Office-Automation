@@ -43,7 +43,8 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | Excel Tables (ListObjects) as the unit of data, structured refs | planned P2 |
 | named ranges (thousands, broken `#REF!`) | planned P3 |
 | pivot tables: rendered output | covered (specimen) ; pivot definitions/sources planned P3 |
-| Power Query, Data Model, external links, linked data types | planned P3 (report as `unsupported_content`) |
+| Power Query, Data Model, external links | covered (`_unsupported`, workbook scope: `power_query`/`data_model`/`external_link`) |
+| linked data types (Rich Data Types, e.g. Stocks/Geography) | planned P3 -- not yet detected; a cell's linked-data metadata is invisible, only its displayed value is extracted |
 | charts, images, shapes, comments/notes, data validation | planned P3 (report presence only) |
 
 ## C. Layout and headers
@@ -82,10 +83,11 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | Case | Status |
 |---|---|
 | formulas extracted as values, formula count recorded | covered [test_formulas_are_values] |
-| formula text / R1C1 patterns / dependencies | planned P3 |
+| formula presence per column (has_formula + one sample R1C1) | covered (`_formulas`) |
+| full formula text / R1C1 run-length patterns / dependencies | planned P3 |
+| stale cached values (calc mode manual, file saved unrecalculated) | covered [`_unsupported` kind `stale_calculation`, checked via `Application.CalculationState` right after open] |
 | array formulas, dynamic arrays (#SPILL!), volatile functions, circular refs | planned P3 |
 | formulas referencing other sheets/workbooks | planned P3 |
-| stale cached values (calc mode manual, file saved unrecalculated) | planned P3 (detect and warn) |
 
 ## F. Multi-run, multi-file, drift
 

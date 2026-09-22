@@ -164,7 +164,7 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
                      truncated=truncated)
 
 
-META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys"}
+META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported"}
 
 
 def meta(cfg, section, run_id=None):
@@ -198,6 +198,9 @@ def meta(cfg, section, run_id=None):
             cur=cat.execute("""SELECT code,severity,table_id,column_id,count,examples,message
                                FROM _dq_findings
                                ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,code,id""")
+        elif section=="unsupported":
+            cur=cat.execute("""SELECT scope,source_id,table_id,kind,count,detail
+                               FROM _unsupported ORDER BY scope,kind""")
         else:
             cur=cat.execute("""SELECT table_id,columns_json,uniqueness,null_rate,status,method,score
                                FROM _keys ORDER BY status DESC,score DESC,id""")

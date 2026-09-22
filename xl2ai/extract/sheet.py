@@ -204,6 +204,17 @@ def extract_sheet(sess, idx, con, res, opts, budget):
         con.execute("INSERT INTO _columns VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (table, p.xl_col - fc + 1, p.name, None if p.header is None else str(p.header), p.xl_col,
                      col_letter(p.xl_col), p.sql_type, p.kind, p.date_kind, n, p.stat.nerr))
+    if res.formula_cells and total_rows:
+        # The sheet has formulas somewhere; find out which columns so an agent can tell "computed" from "entered"
+        # without guessing from the header text. One SpecialCells probe per column, not per cell.
+        for p in plans:
+            try:
+                col_rng = ws.Range(ws.Cells(data_first, p.xl_col), ws.Cells(lr, p.xl_col))
+                formula_cells = sess.call(lambda: col_rng.SpecialCells(XL_FORMULAS))
+                sample = sess.call(lambda: formula_cells.Cells(1, 1).FormulaR1C1)
+                con.execute("INSERT INTO _formulas VALUES (?,?,?,?)", (table, p.name, 1, str(sample)[:200]))
+            except Exception:
+                continue
     for area, val in merged:
         con.execute("INSERT INTO _merged_areas VALUES (?,?,?)", (res.sheet_name, area, val))
     res.status = "extracted"

@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.6.0 - Agent readiness, phase 2: honest gaps (2026-09-22)
+
+* Added detection of content this platform cannot fully read, so a run reports it instead of silently treating
+  the workbook as fully understood: Power Query steps, the Excel Data Model, external workbook links (workbook
+  scope), and charts (sheet scope), each with a plain-language explanation of what is not captured. New
+  `_unsupported` table in both the per-workbook extraction database and the run catalog.
+* Added stale-calculation detection: if Excel reports pending recalculation immediately on opening a workbook
+  (before this tool's own manual-calculation setting could mask it), that is recorded as a blind spot -- any
+  formula-derived value in that workbook may not reflect its latest inputs.
+* Added per-column formula detection (`_formulas`): a column backed by at least one formula is now distinguishable
+  from one that was typed in, with a sample R1C1 formula for context.
+* The AI context pack gained a `blind_spots` section (JSON and Markdown), populated from `_unsupported`, so an
+  agent reading only the compact pack still sees what could not be fully read -- not just what could.
+* Added `xl2ai query meta unsupported` to inspect the full list without opening the workbook.
+* `xl2ai brief`'s per-table readiness now downgrades a table with an unresolved blind spot from `ready` to
+  `needs_review`, and lists each one under `gaps`.
+
 ## 0.5.0 - Agent readiness, phase 1: a truthful entry point (2026-09-22)
 
 * Added `xl2ai brief`: one bounded call that orients a cold agent — current run, freshness, a per-table readiness

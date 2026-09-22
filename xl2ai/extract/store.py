@@ -19,6 +19,8 @@ CREATE TABLE _sheet_preamble (table_name TEXT, xl_row INTEGER, xl_col INTEGER, v
 CREATE TABLE _merged_areas (sheet_name TEXT, area TEXT, value BLOB);
 CREATE TABLE _verification (table_name TEXT, column_name TEXT, check_name TEXT, excel_value REAL,
   sqlite_value REAL, ok INTEGER, note TEXT);
+CREATE TABLE _unsupported (scope TEXT, sheet_name TEXT, kind TEXT, count INTEGER, detail TEXT);
+CREATE TABLE _formulas (table_name TEXT, sql_name TEXT, has_formula INTEGER, sample_r1c1 TEXT);
 """
 
 

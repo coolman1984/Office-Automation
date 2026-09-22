@@ -24,6 +24,7 @@ filter/group-by instead of assuming you saw everything.
 | "Did any business rule fail?" | `xl2ai query meta rules` | `status`, `severity`, `message` per rule |
 | "What quality problems exist?" | `xl2ai query meta quality` | `DQ_*` codes with severity, subject, message |
 | "Which keys are trustworthy?" | `xl2ai query meta keys` | `status=confirmed` (human-declared) vs `inferred` (score attached) |
+| "What couldn't the platform read?" | `xl2ai query meta unsupported` | Power Query, Data Model, external links, stale-calculation, unread charts -- also summarized in `brief`'s `gaps` |
 | "What changed since last time?" | `xl2ai query compare [--kind schema\|volume\|value\|row\|category\|distribution\|kpi]` | already computed; do not recompute by diffing samples yourself |
 | "Where did this row/value come from?" | `xl2ai query trace <table> <xl_row>` | returns the exact Excel row; use this before asserting provenance |
 | "Something not covered above" | `xl2ai query sql <source_id> "SELECT ..."` | single SELECT/WITH only, read-only, capped, authorizer-enforced |

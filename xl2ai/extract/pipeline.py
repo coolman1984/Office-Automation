@@ -18,6 +18,7 @@ from .common import PYWIN32_AVAILABLE, SCHEMA_VERSION, VISIBILITY, log, pywintyp
 from .names import sanitize_table
 from .sheet import SheetResult, extract_sheet
 from .store import open_db, resolve_db_path, write_log
+from .unsupported import detect_sheet_unsupported, detect_stale_calculation, detect_workbook_unsupported
 from .verify import verify_table
 
 
@@ -54,6 +55,15 @@ def process_file(src, db_path, opts):
         open_s = time.perf_counter() - t
         total = sess.robust(lambda: sess.wb.Sheets.Count)    # always go through sess.wb: it changes on restart
         log("INFO", f"Opened in {open_s:.2f}s | {total} sheet(s) | Excel {sess.app.Version}")
+        unsupported = [("workbook", None, kind, count, detail)
+                       for kind, count, detail in detect_workbook_unsupported(sess, sess.wb)]
+        if detect_stale_calculation(sess):
+            unsupported.append(("workbook", None, "stale_calculation", 1,
+                                "the workbook was saved with pending recalculation; formula-derived values may "
+                                "not reflect the latest inputs"))
+            log("WARN", "Workbook has pending recalculation; extracted formula results may be stale")
+        for _, _, kind, count, detail in unsupported:
+            log("WARN", f"Unsupported content: {kind} ({count}) - {detail}")
         used = set()
         kill_once = os.environ.get("XL2SQL_TEST_KILL_BEFORE")   # test hook: simulate an Excel crash once
         for i in range(1, total + 1):
@@ -73,6 +83,9 @@ def process_file(src, db_path, opts):
                 res.read_sec = 0.0
                 try:
                     extract_sheet(sess, i, con, res, opts, budget)
+                    if res.status != "error":
+                        for kind, count, detail in detect_sheet_unsupported(sess, sess.sheet(i)):
+                            unsupported.append(("sheet", res.sheet_name, kind, count, detail))
                     break
                 except Exception as e:
                     if sess.is_dead(e):                    # crash/hang: restart Excel, retry with smaller blocks
@@ -127,6 +140,8 @@ def process_file(src, db_path, opts):
         return 1, results, fatal
     total_s = time.perf_counter() - t_run
     write_log(con, results)
+    if unsupported:
+        con.executemany("INSERT INTO _unsupported VALUES (?,?,?,?,?)", unsupported)
     meta = {"schema_version": SCHEMA_VERSION, "source_path": src, "source_size": os.path.getsize(src),
             "source_modified": dt.datetime.fromtimestamp(os.path.getmtime(src)).isoformat(timespec="seconds"),
             "extracted_at": dt.datetime.now().isoformat(timespec="seconds"), "tool": "excel_to_sqlite.py",
