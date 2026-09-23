@@ -130,6 +130,15 @@ CREATE TABLE _digest_tables (
   table_id TEXT PRIMARY KEY, status TEXT, reason TEXT, excluded_rows INTEGER, measures_json TEXT,
   units_json TEXT, dims_json TEXT, date_column TEXT
 );
+CREATE TABLE IF NOT EXISTS _anomalies (
+  id TEXT PRIMARY KEY, table_id TEXT NOT NULL, column_name TEXT, kind TEXT NOT NULL, severity TEXT,
+  count INTEGER, detail TEXT, examples TEXT, sql TEXT
+);
+CREATE TABLE IF NOT EXISTS _reconciliation (
+  id TEXT PRIMARY KEY, report_table_id TEXT NOT NULL, report_column TEXT, label_column TEXT,
+  source_table_id TEXT, source_column TEXT, dim_column TEXT, agg TEXT, compared INTEGER, matched INTEGER,
+  status TEXT, mismatches TEXT, sql TEXT
+);
 CREATE INDEX idx_columns_table ON _columns(table_id);
 CREATE INDEX idx_unsupported_table ON _unsupported(table_id);
 CREATE INDEX idx_tables_source ON _tables(source_id);

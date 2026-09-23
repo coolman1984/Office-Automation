@@ -106,6 +106,14 @@ def _render_markdown(p):
             top = "; ".join(f"{dim}: " + ", ".join(f"{k} {s:.0%}" if s is not None else str(k) for k, s in g)
                             for dim, g in x["top"].items())
             lines.append(f"- {x['table']} | {x['rows']:,} rows" + (f" | {tot}" if tot else "") + (f" | {top}" if top else ""))
+    if p.get("reconciliation"):
+        lines += ["", "## Reports checked against raw data"]
+        for x in p["reconciliation"]:
+            lines.append(f"- {x['report']}.{x['column']} = {x['explained_by']} | rows agreeing {x['agree']}")
+    if p.get("anomalies"):
+        lines += ["", "## Looks unusual"]
+        for x in p["anomalies"]:
+            lines.append(f"- {x['severity']} {x['table']}.{x['column']} {x['kind']} ({x['count']})")
     if p.get("lineage"):
         lines += ["", "## Computed from (formula lineage)"]
         for x in p["lineage"]:
@@ -251,6 +259,21 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                            ORDER BY dim, rank""", (tid,)):
                     item["top"].setdefault(dim, []).append([k, None if share is None else round(share, 3)])
                 _add_budgeted(payload, "digest", item, budget_tokens, omitted, "digest", state)
+        if "_reconciliation" in present:
+            for tid, col, src, m, agg, compared, matched, status in con.execute(
+                    """SELECT report_table_id, report_column, source_table_id, source_column, agg, compared, matched,
+                              status FROM _reconciliation ORDER BY status DESC, report_table_id"""):
+                _add_budgeted(payload, "reconciliation",
+                              {"report": handles.get(tid, tid), "column": col,
+                               "explained_by": f"{agg}({handles.get(src, src)}.{m})", "agree": f"{matched}/{compared}"},
+                              budget_tokens, omitted, "reconciliation", state)
+        if "_anomalies" in present:
+            for tid, col, kind, sev, cnt in con.execute(
+                    """SELECT table_id, column_name, kind, severity, count FROM _anomalies
+                       ORDER BY CASE severity WHEN 'warn' THEN 0 ELSE 1 END, table_id, kind"""):
+                _add_budgeted(payload, "anomalies", {"table": handles.get(tid, tid), "column": col, "kind": kind,
+                                                     "severity": sev, "count": cnt},
+                              budget_tokens, omitted, "anomalies", state)
         if "_regions" in present:
             for tid, n in con.execute("""SELECT table_id, COUNT(*) FROM _regions WHERE kind='table'
                                          GROUP BY table_id HAVING COUNT(*) > 1 ORDER BY table_id"""):
@@ -271,7 +294,8 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                "columns":"query describe","relationships":"query meta relationships",
                "definitions":"query meta definitions","kpis":"query meta kpis","rules":"query meta rules",
                "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief",
-               "lineage":"query meta lineage","regions":"query meta regions","digest":"query digest"}
+               "lineage":"query meta lineage","regions":"query meta regions","digest":"query digest",
+               "reconciliation":"query meta reconciliation","anomalies":"query meta anomalies"}
         payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
                               for k,v in sorted(omitted.items()) if v]
         base = dict(payload)

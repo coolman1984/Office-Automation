@@ -25,6 +25,8 @@ STAGE_PURPOSE = {
     "repair": "suggest opt-in cleanup fixes, applied to nothing but _repairs",
     "rules": "apply pack knowledge, rules and KPIs",
     "relations": "infer relationships between tables",
+    "anomalies": "flag outliers, odd months, rare negatives and impossible dates",
+    "reconcile": "check report tables against the raw data they summarise",
     "digest": "pre-compute key numbers: totals, biggest groups, monthly trends",
     "changes": "compare against the previous trusted run",
     "audit": "verify the run's artifacts agree with each other",

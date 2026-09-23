@@ -146,7 +146,13 @@ KPIs. Packs are loaded only from paths declared in project config. Results carry
 calculator plugins and automatic applies-when selectors remain optional future extensions; they are not silently
 treated as built.
 
-## 5.5. Agent access: CLI first, decided (not just deferred)
+## 5.5. Agent access: CLI first, decided (not just deferred) -- superseded in 0.13.0
+
+**0.13.0:** an MCP server now exists (`xl2ai serve`, see `CONNECTING.md`) because agent hosts that cannot, or should
+not, be taught a command line are the common case in practice. It is a thin layer over the same query/brief
+functions (so it cannot drift from the CLI), keeps its tool list to eight purpose-named tools with short schemas to
+limit the per-call context cost argued below, and returns the same capped, evidence-bearing answers. The original
+reasoning follows for the record.
 
 Section 7 has said "tools are CLI first, an MCP wrapper is optional later" since before any agent-readiness work
 existed. That default is now a decision, not a placeholder, based on: an MCP server pays a context cost on every

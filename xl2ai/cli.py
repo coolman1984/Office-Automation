@@ -10,6 +10,9 @@ import sys
 
 # command -> (module, function, one-line description)
 STAGES = {
+    "open": ("xl2ai.workspace", "main", "point xl2ai at a folder of Excel files (creates its hidden workspace)"),
+    "serve": ("xl2ai.mcp_server", "main", "run the agent connection (MCP server over stdio)"),
+    "connect": ("xl2ai.mcp_server", "connect_main", "print the settings that connect an AI agent to a workspace"),
     "init": ("xl2ai.init_project", "main", "create a reusable project config and optional rule-pack skeleton"),
     "doctor": ("xl2ai.doctor", "main", "check environment, sources, storage and current dataset"),
     "audit": ("xl2ai.audit", "main", "verify run artifacts and cross-database consistency"),
@@ -28,6 +31,8 @@ STAGES = {
     "relations": ("xl2ai.relations", "main", "infer conservative relationships between tables"),
     "rules": ("xl2ai.rules", "main", "run configured deterministic business rules and KPIs"),
     "digest": ("xl2ai.digest", "main", "pre-compute key numbers: totals, biggest groups, monthly trends"),
+    "anomalies": ("xl2ai.anomalies", "main", "flag outliers, odd months, rare negatives and impossible dates"),
+    "reconcile": ("xl2ai.reconcile", "main", "check report tables against the raw data they summarise"),
     "changes": ("xl2ai.changes", "main", "compare a run with the previous trusted run"),
     "pack": ("xl2ai.contextpack", "main", "build a compact deterministic context pack for AI"),
     "query": ("xl2ai.query", "main", "read-only capped schema/describe/sample/aggregate/trace/sql tools"),

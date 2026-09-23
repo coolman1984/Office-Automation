@@ -66,6 +66,8 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_lineage` [built] | id, table_id, column_id, ref_kind (`sheet\|workbook`), ref_workbook, ref_sheet, target_source_id, target_table_id, status (`resolved\|unresolved\|external`), cells, sample, method (`all_formulas\|formula_sample`) -- always `inferred`; own-sheet references are not lineage |
 | `_digest` [built] | id, table_id, section (`total\|by_group\|by_month`), measure (`*` = row count), dim, key, value, rows, share, rank, sql -- every number carries its reproducing SQL; totals rows excluded |
 | `_digest_tables` [built] | table_id, status (`computed\|skipped\|error`), reason, excluded_rows, measures_json, units_json, dims_json, date_column |
+| `_anomalies` [built] | id, table_id, column_name, kind (`outlier\|negative\|trend_jump\|missing_period\|date_out_of_range`), severity, count, detail, examples (JSON `[[xl_row, value], ...]` or months), sql -- always `inferred`; totals rows excluded |
+| `_reconciliation` [built] | id, report_table_id, report_column, label_column, source_table_id, source_column, dim_column, agg (`SUM\|COUNT`), compared, matched, status (`reconciled\|partial`), mismatches (JSON, <= 10, with both numbers and the report's Excel row), sql |
 | `_repairs` [built, opt-in] | id, table_id, column_id, xl_row, original_value, repaired_value, rule (`null_token\|category_consolidation\|text_as_number`) -- empty unless `[repair].enabled = true`; never written back to any data table |
 
 ## 4. Run manifest [phase 1] `manifest.json`

@@ -62,6 +62,8 @@ def build_brief(cfg, run_id=None, in_progress=False):
         has_grain = "_table_grain" in existing
         has_regions = "_regions" in existing
         has_lineage = "_lineage" in existing
+        has_anomalies = "_anomalies" in existing
+        has_recon = "_reconciliation" in existing
         for tid, sid, sheet, table_name, rows in con.execute(
             "SELECT table_id,source_id,sheet_name,table_name,row_count FROM _tables ORDER BY table_id"):
             errors = con.execute(
@@ -96,10 +98,20 @@ def build_brief(cfg, run_id=None, in_progress=False):
                         "WHERE table_id=? ORDER BY ref_workbook, ref_sheet", (tid,)):
                     feeds_from.append({"table_id": target, "workbook": book, "sheet": ref_sheet, "status": status_})
                     external_refs += status_ != "resolved"
+            anomalies = 0
+            if has_anomalies:
+                anomalies = con.execute("SELECT COUNT(*) FROM _anomalies WHERE table_id=? AND severity='warn'",
+                                        (tid,)).fetchone()[0]
+            disagreements = []
+            if has_recon:
+                disagreements = [dict(zip(("column", "source_table_id", "compared", "matched", "mismatches"), r))
+                                 for r in con.execute(
+                                     """SELECT report_column, source_table_id, compared, matched, mismatches
+                                        FROM _reconciliation WHERE report_table_id=? AND status='partial'""", (tid,))]
             mismatches = verify_mismatches.get(sid, 0)
             if mismatches:
                 readiness = "not_ready"
-            elif errors or blind_spots or totals_rows or regions > 1:
+            elif errors or blind_spots or totals_rows or regions > 1 or disagreements:
                 readiness = "needs_review"
             else:
                 readiness = "ready"
@@ -109,7 +121,8 @@ def build_brief(cfg, run_id=None, in_progress=False):
                                    "quality_warnings": warnings, "blind_spots": blind_spots,
                                    "totals_rows": totals_rows, "verify_mismatches": mismatches,
                                    "regions": regions, "feeds_from": feeds_from,
-                                   "unresolved_sources": external_refs})
+                                   "unresolved_sources": external_refs, "anomalies": anomalies,
+                                   "report_disagreements": disagreements})
 
         rule_errors = con.execute("SELECT COUNT(*) FROM _rule_results WHERE status='error'").fetchone()[0]
         rule_failures = con.execute(
@@ -145,6 +158,13 @@ def build_brief(cfg, run_id=None, in_progress=False):
             out["gaps"].append({"kind": "totals_row_in_data", "table_id": t["table_id"],
                                 "message": f"{t['totals_rows']} totals/subtotal row(s) inside the data; exclude "
                                            "them explicitly before summing (see query meta row_flags)"})
+        for d in t.get("report_disagreements", []):
+            bad = json.loads(d["mismatches"] or "[]")
+            ex = "; ".join(f"{b['label']}: report {b['report']} vs data {b['data']}" for b in bad[:2])
+            out["gaps"].append({"kind": "report_disagrees_with_data", "table_id": t["table_id"],
+                                "message": f"column {d['column']}: {d['compared'] - d['matched']} of {d['compared']} "
+                                           f"rows do not match the raw data ({ex}); quote the raw data, and say the "
+                                           "report differs (see query meta reconciliation)"})
         if t["regions"] > 1:
             out["gaps"].append({"kind": "several_tables_in_sheet", "table_id": t["table_id"],
                                 "message": f"this sheet holds {t['regions']} separate tables that were stored as one "
@@ -192,6 +212,10 @@ def _render(out):
             flags.append(f"{t['totals_rows']} totals row(s)")
         if t.get("regions", 0) > 1:
             flags.append(f"{t['regions']} tables in one sheet")
+        if t.get("anomalies"):
+            flags.append(f"{t['anomalies']} unusual pattern(s)")
+        if t.get("report_disagreements"):
+            flags.append("report disagrees with raw data")
         if t.get("feeds_from"):
             flags.append("computed from " + ", ".join(sorted({(f["workbook"] + "!" if f["workbook"] else "")
                                                               + (f["sheet"] or "") for f in t["feeds_from"]})))

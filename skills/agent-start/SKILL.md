@@ -6,7 +6,8 @@ description: The single first command a cold agent runs on an unfamiliar xl2ai p
 # agent-start
 
 You are an agent that just arrived at a project. Read `skills/platform-overview` for the rules if you have not,
-then run exactly this before anything else:
+If you are connected to the xl2ai MCP server, call its `start` tool instead and follow what it returns (see
+`CONNECTING.md`). Otherwise run exactly this before anything else:
 
 ```
 python -m xl2ai brief

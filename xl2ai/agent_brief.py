@@ -17,7 +17,9 @@ import argparse
 import sys
 
 from .brief import build_brief
+from .anomalies import anomaly_lines
 from .digest import digest_lines
+from .reconcile import reconciliation_lines
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.fsutil import atomic_write_text
@@ -169,6 +171,8 @@ def build_agent_brief(cfg, run_id, catalog_path=None, in_progress=False):
                     lines.append(f"    - region {no}: {_a1(r0, c0)}:{_a1(r1, c1)}"
                                  + (f", header row {hdr}" if hdr else ", no header row"))
             lines.extend(digest_lines(con, tid))
+            lines.extend(anomaly_lines(con, tid))
+            lines.extend(reconciliation_lines(con, tid))
             lines.append("Columns:")
             lines.extend(_column_lines(con, tid))
             lines.append("")

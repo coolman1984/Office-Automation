@@ -23,6 +23,10 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Report-shaped sheets are described, not flattened blindly: several tables on one sheet (`query meta regions`,
   `query region <table> <n>` reads one back out under its own header) and grouped multi-row headers
   ("Plan" under "Q1") are detected and recorded.
+- An agent connection (MCP server, `xl2ai serve`) with eight purpose-named tools, and workspaces: point it at any
+  folder of Excel files (`xl2ai open`), nothing else to configure.
+- Reports checked against the raw data they summarise (disagreeing rows listed with both numbers), and unusual
+  values flagged in advance (outliers, odd months, missing months, impossible dates).
 - Key numbers computed in advance for every data table: totals, biggest groups and monthly trends, each with the
   SQL that produced it (`query digest <table>`); totals rows excluded, prices averaged rather than added.
 - `query find <text> [--values]`: where a name, header or value lives across every file, Arabic-spelling tolerant.
@@ -55,6 +59,17 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Opt-in, reversible cleanup suggestions (null markers, inconsistent category spelling, text-as-number) that
   never touch the extracted data -- off by default (`[repair].enabled=false`); `xl2ai query repaired` previews
   them applied, on the fly, without writing anything.
+
+## Connecting an agent (start here)
+
+```powershell
+python -m xl2ai open "D:\Sales Files"          # once: creates the hidden workspace beside the files
+python -m xl2ai refresh --config "D:\Sales Files"   # reads every workbook once (later: only changed ones)
+python -m xl2ai connect --workspace "D:\Sales Files" # prints the line to add to Claude Code / Desktop / any MCP host
+```
+
+The agent then calls `start` and gets the whole picture in one read. Where everything lives and the order of
+events: `CONNECTING.md`.
 
 ## Install
 

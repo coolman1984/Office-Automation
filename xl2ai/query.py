@@ -207,9 +207,9 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
 
 META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported",
                  "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates", "repairs",
-                 "regions", "header_groups", "lineage", "digest"}
+                 "regions", "header_groups", "lineage", "digest", "anomalies", "reconciliation"}
 NEWER_SECTIONS = {"regions": "_regions", "header_groups": "_header_groups", "lineage": "_lineage",
-                  "digest": "_digest_tables"}
+                  "digest": "_digest_tables", "anomalies": "_anomalies", "reconciliation": "_reconciliation"}
 
 
 def meta(cfg, section, run_id=None):
@@ -285,6 +285,13 @@ def meta(cfg, section, run_id=None):
         elif section=="digest":
             cur=cat.execute("""SELECT table_id,status,reason,excluded_rows,measures_json,dims_json,date_column
                                FROM _digest_tables ORDER BY table_id""")
+        elif section=="anomalies":
+            cur=cat.execute("""SELECT table_id,column_name,kind,severity,count,detail,examples
+                               FROM _anomalies ORDER BY CASE severity WHEN 'warn' THEN 0 ELSE 1 END,table_id,kind""")
+        elif section=="reconciliation":
+            cur=cat.execute("""SELECT report_table_id,report_column,label_column,source_table_id,source_column,
+                                      dim_column,agg,compared,matched,status,mismatches
+                               FROM _reconciliation ORDER BY status DESC,report_table_id,report_column""")
         elif section=="repairs":
             cur=cat.execute("""SELECT table_id,column_id,xl_row,original_value,repaired_value,rule
                                FROM _repairs ORDER BY table_id,xl_row""")
@@ -304,6 +311,8 @@ def meta(cfg, section, run_id=None):
         "duplicates":{"evidence"},
         "header_groups":{"path"},
         "digest":{"measures_json","dims_json"},
+        "anomalies":{"examples"},
+        "reconciliation":{"mismatches"},
     }.get(section,set())
     if json_cols:
         indexes={name:i for i,name in enumerate(columns)}
@@ -522,11 +531,15 @@ def trace(cfg, selector, xl_row, run_id=None):
     rid,run_dir,catp=_run_paths(cfg,run_id)
     with _catalog(catp) as cat:
         tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
+        path=(cat.execute("SELECT path FROM _sources WHERE source_id=?",(sid,)).fetchone() or [None])[0]
     with _source_db(run_dir,db_rel) as src:
         columns,rows,truncated=_run_capped(src,f"SELECT * FROM {q(table)} WHERE _xl_row=? LIMIT 2",(int(xl_row),),cfg)
     return _envelope("trace",columns,rows,started,cfg,
-                     evidence=[{"run_id":rid,"source_id":sid,"sheet":sheet,"table_id":tid,"xl_row":int(xl_row)}],
-                     truncated=truncated)
+                     evidence=[{"run_id":rid,"source_id":sid,"file":path,"sheet":sheet,"table_id":tid,
+                                "xl_row":int(xl_row)}],
+                     truncated=truncated,
+                     hint=(f"{os.path.basename(path or '')} > sheet '{sheet}' > row {int(xl_row)}" if rows
+                           else f"no stored row {int(xl_row)} in this table (header, blank or outside the table)"))
 
 
 def source_alias(source_id):
@@ -564,7 +577,27 @@ def sql(cfg, source_id, statement, run_id=None):
             alias=source_alias(sid)
             src.execute("ATTACH DATABASE ? AS "+q(alias),(f"file:{path}?mode=ro",))
             aliases.append(alias)
-        hint="attached: "+", ".join(aliases)+" -- qualify tables as <alias>.<table>"
+        # plain names work too: every table name that exists in exactly one workbook gets a temp view, so
+        # "SELECT ... FROM Orders JOIN Customers ..." needs no aliases at all (created before the authorizer)
+        seen={}
+        for alias in aliases:
+            for (name,) in src.execute(f"SELECT name FROM {q(alias)}.sqlite_master "
+                                       "WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\'"):
+                seen.setdefault(name.lower(),[]).append((alias,name))
+        ambiguous=[]
+        for key,where in seen.items():
+            if len(where)==1:
+                alias,name=where[0]
+                src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM {q(alias)}.{q(name)}")
+            else:
+                # never let SQLite silently pick one workbook's table: the plain name fails, naming the fix
+                name=where[0][1]
+                ambiguous.append(name)
+                choices=" or ".join(f"{a}.{n}" for a,n in where)
+                src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM "
+                            f"{q(f'ambiguous name {name}: it exists in several workbooks - write {choices}')}")
+        hint=("tables usable by plain name; also qualified as <alias>.<table> with aliases: "+", ".join(aliases)
+              +(f"; qualify these (name in several workbooks): {', '.join(sorted(ambiguous))}" if ambiguous else ""))
     else:
         src=sqlite3.connect(f"file:{os.path.abspath(os.path.join(run_dir,rows[0][1].replace('/',os.sep)))}?mode=ro",
                             uri=True)
@@ -593,38 +626,41 @@ def main(argv=None):
     ap.add_argument("--config")
     ap.add_argument("--run",help="inspect a specific run id instead of the current trusted run")
     sub=ap.add_subparsers(dest="cmd",required=True)
-    sub.add_parser("schema")
-    d=sub.add_parser("describe")
+    common=argparse.ArgumentParser(add_help=False)          # --config/--run accepted after the command too
+    common.add_argument("--config",default=argparse.SUPPRESS)
+    common.add_argument("--run",default=argparse.SUPPRESS)
+    sub.add_parser("schema",parents=[common])
+    d=sub.add_parser("describe",parents=[common])
     d.add_argument("table")
-    s=sub.add_parser("sample")
+    s=sub.add_parser("sample",parents=[common])
     s.add_argument("table")
     s.add_argument("--limit",type=int)
-    rp=sub.add_parser("repaired")
+    rp=sub.add_parser("repaired",parents=[common])
     rp.add_argument("table")
     rp.add_argument("--limit",type=int)
-    a=sub.add_parser("aggregate")
+    a=sub.add_parser("aggregate",parents=[common])
     a.add_argument("table")
     a.add_argument("column")
     a.add_argument("--op",default="count")
     a.add_argument("--group-by")
-    m=sub.add_parser("meta")
+    m=sub.add_parser("meta",parents=[common])
     m.add_argument("section",choices=sorted(META_SECTIONS))
-    fd=sub.add_parser("find")
+    fd=sub.add_parser("find",parents=[common])
     fd.add_argument("text")
     fd.add_argument("--values",action="store_true",help="also search every text cell (time-bounded)")
-    dg=sub.add_parser("digest")
+    dg=sub.add_parser("digest",parents=[common])
     dg.add_argument("table")
     dg.add_argument("--section",choices=("total","by_group","by_month"))
-    rg=sub.add_parser("region")
+    rg=sub.add_parser("region",parents=[common])
     rg.add_argument("table")
     rg.add_argument("region_no",type=int)
     rg.add_argument("--limit",type=int)
-    c=sub.add_parser("compare")
+    c=sub.add_parser("compare",parents=[common])
     c.add_argument("--kind")
-    t=sub.add_parser("trace")
+    t=sub.add_parser("trace",parents=[common])
     t.add_argument("table")
     t.add_argument("xl_row",type=int)
-    x=sub.add_parser("sql")
+    x=sub.add_parser("sql",parents=[common])
     x.add_argument("source_id")
     x.add_argument("statement")
     args=ap.parse_args(argv)

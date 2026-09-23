@@ -161,6 +161,15 @@ def find_config(start=None):
 
 def load_config(path=None, required=True, start=None):
     """Load a config file (explicit path, or discovered upward from cwd). Without one, defaults + cwd root."""
+    if path and os.path.isdir(path):                  # an Excel folder or a workspace folder, not a file
+        from ..workspace import resolve_workspace
+        resolved = resolve_workspace(path)
+        if not resolved:
+            raise _err(f"{path} has no xl2ai workspace yet", f'run: python -m xl2ai open "{path}"')
+        path = resolved
+    if not path and os.environ.get("XL2AI_WORKSPACE"):
+        from ..workspace import resolve_workspace
+        path = resolve_workspace(os.environ["XL2AI_WORKSPACE"])
     path = path or find_config(start)
     if path is None:
         if required:

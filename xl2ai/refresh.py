@@ -189,6 +189,22 @@ def stage_digest(run, st, cfg, ctx):
         st.warn(f"key numbers for {tid} could not be computed: {reason}")
 
 
+def stage_anomalies(run, st, cfg, ctx):
+    from .anomalies import build_anomalies
+    path = build_anomalies(cfg, run.id, ctx.get("catalog"))
+    with ro_connection(path) as con:
+        st.detail("anomalies", con.execute("SELECT COUNT(*) FROM _anomalies").fetchone()[0])
+
+
+def stage_reconcile(run, st, cfg, ctx):
+    from .reconcile import build_reconciliation
+    path = build_reconciliation(cfg, run.id, ctx.get("catalog"))
+    with ro_connection(path) as con:
+        st.detail("report_columns_checked", con.execute("SELECT COUNT(*) FROM _reconciliation").fetchone()[0])
+        st.detail("report_columns_disagreeing",
+                  con.execute("SELECT COUNT(*) FROM _reconciliation WHERE status='partial'").fetchone()[0])
+
+
 def stage_analyze(run, st, cfg, ctx):
     from .analyze import analyze_catalog
     path = analyze_catalog(cfg, run.id, ctx.get("catalog"))
@@ -331,7 +347,7 @@ def stage_extract(run, st, cfg, ctx):
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
           ("analyze", stage_analyze), ("semantics", stage_semantics), ("repair", stage_repair),
           ("rules", stage_rules), ("relations", stage_relations), ("digest", stage_digest),
-          ("changes", stage_changes),
+          ("anomalies", stage_anomalies), ("reconcile", stage_reconcile), ("changes", stage_changes),
           ("audit", stage_audit), ("contextpack", stage_contextpack), ("agent_brief", stage_agent_brief),
           ("report", stage_report))
 # rules runs before relations: pack-confirmed keys must exist in `_keys` before relation inference can use them
@@ -368,6 +384,12 @@ def run_refresh(cfg, force=False):
                         break                               # later stages need this stage's output
         finally:
             promoted = run.finish()
+            if promoted:
+                try:
+                    from .workspace import publish_latest
+                    publish_latest(cfg, run.id)
+                except OSError as e:                   # a convenience copy must never undo a promotion
+                    log("WARN", f"could not update data/latest: {e}")
             BUS.emit(E.RUN_END, f"run {run.m['status']}", run_id=run.id,
                      status=run.m["status"], promoted=bool(promoted))
             detach()

@@ -30,10 +30,13 @@ def expand_paths(paths):
             for ext in EXTENSIONS:
                 out += glob.glob(os.path.join(p, f"*.{ext}"))
         elif any(ch in p for ch in "*?"):
-            out += glob.glob(p)
+            out += [f for f in glob.glob(p, recursive=True)
+                    if os.path.splitext(f)[1].lower().lstrip(".") in KINDS]
         else:
             out.append(p)
-    return [os.path.abspath(f) for f in dict.fromkeys(out) if not os.path.basename(f).startswith("~$")]
+    skip = (os.sep + ".xl2ai" + os.sep, "/.xl2ai/")                   # a workspace never feeds itself
+    return [os.path.abspath(f) for f in dict.fromkeys(out)
+            if not os.path.basename(f).startswith("~$") and not any(s in os.path.abspath(f) for s in skip)]
 
 
 def source_id(path, alias=None):

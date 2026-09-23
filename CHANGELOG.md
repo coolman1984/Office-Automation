@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## 0.13.0 - The agent connection, workspaces, report checks and anomalies (2026-09-23)
+
+The theme: make "where does everything live and how does an agent talk to it" simple and explicit
+(`CONNECTING.md`), and answer two more questions before the agent asks them.
+
+* **Workspaces** (`xl2ai open <excel folder>`, `xl2ai/workspace.py`): the Excel folder *is* the project. `open`
+  creates a hidden `.xl2ai/` beside the files (config covering every workbook in the folder and its sub-folders,
+  an `AGENTS.md` for file-reading agents, and `data/`), or under `~/.xl2ai/workspaces/` with a registry when the
+  folder is read-only. Every `--config` now also accepts a folder, and `XL2AI_WORKSPACE` can name one. Each promoted
+  run's AI files are copied to `data/latest/` (one stable path). Excel lock files (`~$`), non-workbook files and the
+  workspace itself are never sources.
+* **MCP server** (`xl2ai serve`, `xl2ai/mcp_server.py`, no third-party dependency): JSON-RPC 2.0 over stdio,
+  protocol versions 2025-06-18 / 2025-03-26 / 2024-11-05. Server `instructions` state the workflow; eight tools
+  (`start`, `prepare`, `find`, `table`, `query`, `facts`, `region`, `trace`) with read-only annotations (only
+  `prepare` writes); resources (`xl2ai://brief`, `xl2ai://context-pack`, `xl2ai://instructions`); a prompt
+  (`analyze_excel_folder`). `prepare` runs the refresh in a background thread and reports progress from the
+  pipeline's event bus, so long builds never block or time out a tool call. stdout carries protocol only (stray
+  output is redirected to stderr). Tool errors are results with a code and hint, never crashes.
+  `xl2ai connect [--workspace] [--write]` prints the Claude Code / Claude Desktop / generic MCP settings.
+  This supersedes the "CLI first, MCP only if needed" decision in `ARCHITECTURE.md` §5.5: both exist, over the
+  same functions.
+* **Cross-file SQL without aliases**: `query sql "*"` (and the MCP `query` tool) exposes every table by its plain
+  name when that name is unique across workbooks; a name present in several workbooks fails with a message naming
+  the qualified choices, instead of SQLite silently picking one.
+* **Report reconciliation** (`reconcile` stage, `_reconciliation`): small report tables are matched against raw data
+  tables -- report row labels vs a raw category column, report numbers vs SUM/COUNT of each raw amount by that
+  category, a "Total" row vs the grand total. Explained columns are listed; disagreeing rows become a
+  `report_disagrees_with_data` gap in `brief` with both numbers. Values only, so it also works for pasted-value and
+  DRM reports.
+* **Anomalies** (`anomalies` stage, `_anomalies`): extreme outliers (3xIQR fences) with examples by Excel row, rare
+  negatives in positive measures, months far from the usual level (robust z on the monthly key numbers), months
+  with no rows inside the covered range, and dates before 1990 or over a year ahead. Shown in the agent brief,
+  context pack, `brief` flags and `query meta anomalies`.
+* `query trace` now names the file, sheet and row (and says clearly when a row is not stored). `query` sub-commands
+  accept `--config`/`--run` after the command too.
+
 ## 0.12.0 - Key numbers, find, cross-file joins, parallel extraction (2026-09-23)
 
 The theme: the questions every agent asks first on unfamiliar data -- "what are the big numbers", "where is X",

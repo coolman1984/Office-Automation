@@ -1,6 +1,7 @@
 """Key numbers (digest), `query find`, cross-file SQL, join recipes and parallel extraction -- end to end on two real
 .xlsx files (sales + a separate customers workbook), with the direct engine. No Excel needed."""
 import datetime as dt
+import json
 import os
 import sqlite3
 import tempfile
@@ -27,6 +28,23 @@ def _sales(path):
         ws.append([i, dt.date(2024, 1 + (i - 1) // 20, 1 + i % 20), 100 + i % 6, cities[i % 3], qty, price,
                    qty * price])
     ws.append(["Total", None, None, None, None, None, 999999])      # a totals row that must not be counted
+    # a summary report of amount by city, with one number that drifted from the data
+    by_city = {}
+    for i in range(1, 61):
+        by_city[cities[i % 3]] = by_city.get(cities[i % 3], 0) + (i % 5 + 1) * 10.0
+    rep = wb.create_sheet("City Report")
+    rep.append(["city", "sales"])
+    for city, value in by_city.items():
+        rep.append([city, value + (5 if city == "Giza" else 0)])
+    rep.append(["Total", sum(by_city.values())])
+    # a long daily log with one extreme value and a missing month (for the anomaly detectors)
+    log = wb.create_sheet("Daily Log")
+    log.append(["day", "region", "amount"])
+    for d in range(0, 240):
+        day = dt.date(2023, 1, 1) + dt.timedelta(days=d)
+        if day.month == 5:
+            continue
+        log.append([day, ["N", "S"][d % 2], 100 + (d % 7) + (50000 if d == 100 else 0)])
     wb.save(path)
 
 
@@ -160,7 +178,7 @@ class TestAgentTools(unittest.TestCase):
                                      WHERE o.order_id IS NOT NULL GROUP BY c.segment ORDER BY c.segment""")
         self.assertTrue(out["ok"])
         self.assertEqual([r[0] for r in out["rows"]], ["Corporate", "Retail"])
-        self.assertIn("attached", out["hint"])
+        self.assertIn("aliases", out["hint"])
 
     def test_cross_file_sql_stays_read_only(self):
         from xl2ai.core.errors import Xl2aiError
@@ -175,6 +193,42 @@ class TestAgentTools(unittest.TestCase):
         self.assertIn("## How the tables connect", text)
         self.assertIn('`Orders.customer_id` -> `Customers.customer_id`', text)
         self.assertIn('query sql "*"', text)
+
+
+    # -- reconciliation and anomalies ---------------------------------------------------------------------------
+    def test_report_is_checked_against_raw_data(self):
+        rows = self.cat("""SELECT r.report_column, t.sheet_name, r.source_column, r.dim_column, r.agg, r.compared,
+                                  r.matched, r.status, r.mismatches
+                           FROM _reconciliation r JOIN _tables t ON t.table_id=r.source_table_id
+                           JOIN _tables rt ON rt.table_id=r.report_table_id WHERE rt.sheet_name='City Report'""")
+        self.assertEqual(len(rows), 1)
+        col, src, measure, dim, agg, compared, matched, status, bad = rows[0]
+        self.assertEqual((col, src, measure, dim, agg), ("sales", "Orders", "amount", "city", "SUM"))
+        self.assertEqual((compared, matched, status), (4, 3, "partial"))       # 3 cities + the Total row
+        self.assertEqual([b["label"] for b in json.loads(bad)], ["Giza"])
+
+    def test_disagreement_is_a_gap(self):
+        from xl2ai.brief import build_brief
+        out, code = build_brief(self.cfg)
+        gaps = [g for g in out["gaps"] if g["kind"] == "report_disagrees_with_data"]
+        self.assertEqual(len(gaps), 1)
+        self.assertIn("Giza", gaps[0]["message"])
+        with open(os.path.join(self.refresh_run.dir, "ai", "agent_brief.md"), encoding="utf-8") as f:
+            self.assertIn("1 of 4 rows disagree", f.read())
+
+    def test_anomalies_found(self):
+        tid = self.cat("SELECT table_id FROM _tables WHERE sheet_name='Daily Log'")[0][0]
+        found = {(c, k): (n, json.loads(e)) for c, k, n, e in self.cat(
+            "SELECT column_name, kind, count, examples FROM _anomalies WHERE table_id=?", (tid,))}
+        count, examples = found[("amount", "outlier")]
+        self.assertEqual(count, 1)
+        self.assertEqual(examples[0][1], 50000 + 100 + 100 % 7)
+        self.assertEqual(found[("day", "missing_period")][1], ["2023-05"])
+
+    def test_clean_table_has_no_outliers(self):
+        tid = self.orders_id()
+        kinds = {k for k, in self.cat("SELECT kind FROM _anomalies WHERE table_id=?", (tid,))}
+        self.assertNotIn("outlier", kinds)                       # the 999,999 totals row is excluded first
 
 
 class TestWorkerSetting(unittest.TestCase):
