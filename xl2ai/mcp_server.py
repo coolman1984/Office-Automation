@@ -56,7 +56,7 @@ FACT_TOPICS = ("relationships", "lineage", "reconciliation", "anomalies", "quali
                "header_groups", "row_flags", "table_kind", "repairs", "digest", "changes")
 
 WS = {"type": "string", "description": "Folder holding the Excel files (or its .xl2ai workspace). Optional when the "
-                                       "server was started with --workspace."}
+                                       "agent was opened in that folder or the server has a default."}
 
 
 def _tool(name, title, description, props, required=(), read_only=True):
@@ -153,6 +153,15 @@ def _table_result(env, extra=None):
     return out
 
 
+def _has_workbooks(folder):
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return False
+    return any(os.path.splitext(n)[1].lower() in (".xlsx", ".xlsm", ".xlsb", ".xls") and not n.startswith("~$")
+               for n in names)
+
+
 class Job:
     """One background refresh. Progress comes from the pipeline's own event bus."""
 
@@ -212,7 +221,16 @@ class Server:
 
     # ---- workspace resolution ----------------------------------------------------------------------------
     def _target(self, args):
-        return args.get("workspace") or self.default_workspace or os.environ.get("XL2AI_WORKSPACE")
+        explicit = args.get("workspace") or self.default_workspace or os.environ.get("XL2AI_WORKSPACE")
+        if explicit:
+            return explicit
+        # Claude Code and Codex start the server in the folder they were opened in: use it when it is (or holds)
+        # an Excel folder, so an agent opened there needs no path at all
+        from .workspace import resolve_workspace
+        cwd = os.getcwd()
+        if resolve_workspace(cwd) or _has_workbooks(cwd):
+            return cwd
+        return None
 
     def _config_path(self, args, create=False):
         from .workspace import open_workspace, resolve_workspace
@@ -554,8 +572,9 @@ def main(argv=None):
 
 
 def client_config(workspace=None):
-    args = ["-m", "xl2ai", "serve"] + (["--workspace", os.path.abspath(workspace)] if workspace else [])
-    return {"mcpServers": {"xl2ai": {"command": sys.executable, "args": args}}}
+    from .connectors import server_command
+    cmd = server_command(workspace)
+    return {"mcpServers": {"xl2ai": {"command": cmd[0], "args": cmd[1:]}}}
 
 
 def connect_main(argv=None):
@@ -564,14 +583,28 @@ def connect_main(argv=None):
     ap.add_argument("--workspace", help="the Excel folder the agent should work on by default")
     ap.add_argument("--write", action="store_true",
                     help="write .mcp.json into the workspace folder (agents opened there pick it up automatically)")
+    ap.add_argument("--install", nargs="+", choices=("all", "claude-code", "codex", "claude-desktop"),
+                    help="register xl2ai with these agent programs directly (all = every one found here)")
+    ap.add_argument("--dry-run", action="store_true", help="with --install: show what would change, change nothing")
     args = ap.parse_args(argv)
+    if args.install:
+        from .connectors import install
+        results = install(args.install, args.workspace, args.dry_run)
+        for r in results:
+            mark = "would change" if args.dry_run and r["changed"] else ("connected" if r["changed"] else "unchanged")
+            print(f"{r['host']:<15} {mark:<13} {r.get('file', '')}\n{'':15} {r['note']}")
+        return 1 if any(r.get("missing") for r in results) and "all" not in args.install else 0
     conf = client_config(args.workspace)
     text = json.dumps(conf, indent=2, ensure_ascii=False)
     print("# Claude Desktop / Cursor / any MCP client: add this to the client's MCP settings")
     print(text)
     cmd = " ".join(f'"{a}"' if " " in a else a for a in [sys.executable] + conf["mcpServers"]["xl2ai"]["args"])
     print("\n# Claude Code (one line):")
-    print(f"claude mcp add xl2ai -- {cmd}")
+    print(f"claude mcp add --scope user xl2ai -- {cmd}")
+    toml_args = ", ".join(json.dumps(a, ensure_ascii=False) for a in conf["mcpServers"]["xl2ai"]["args"])
+    print("\n# Codex CLI: add to ~/.codex/config.toml")
+    print(f"[mcp_servers.xl2ai]\ncommand = {json.dumps(conf['mcpServers']['xl2ai']['command'])}\nargs = [{toml_args}]")
+    print("\n# or let xl2ai do it: xl2ai connect --install all")
     if args.write:
         if not args.workspace:
             print("--write needs --workspace", file=sys.stderr)

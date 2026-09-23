@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.13.1 - One-command connection to Claude Code, Codex CLI and Claude Desktop (2026-09-23)
+
+* `xl2ai connect --install all|claude-code|codex|claude-desktop [--workspace] [--dry-run]` (`xl2ai/connectors.py`):
+  Claude Code via its own `claude mcp add --scope user`; Codex CLI by adding/replacing only the
+  `[mcp_servers.xl2ai]` section of `~/.codex/config.toml` (with a 120 s tool timeout for `prepare`); Claude Desktop
+  by merging into `claude_desktop_config.json`. Existing settings are preserved and backed up once to `.bak`.
+  Verified against a real Claude Code install: `claude mcp list` reports the server as connected.
+* The server now defaults to the folder the host started it in when that folder is a workspace or holds Excel
+  files, so an agent opened in an Excel folder needs no path at all. An explicit `workspace` always wins.
+* The printed settings use the installed program when xl2ai is packaged as a standalone executable.
+
 ## 0.13.0 - The agent connection, workspaces, report checks and anomalies (2026-09-23)
 
 The theme: make "where does everything live and how does an agent talk to it" simple and explicit

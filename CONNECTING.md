@@ -40,11 +40,25 @@ milliseconds, for a few hundred tokens.
 
 ## Connecting an agent (MCP -- recommended)
 
+One command registers xl2ai with every agent program found on the machine:
+
+```
+python -m xl2ai connect --install all            # or: claude-code / codex / claude-desktop ; add --dry-run to preview
+```
+
+| Host | What `--install` does | Which folder the agent works on |
+|---|---|---|
+| Claude Code CLI | runs `claude mcp add --scope user xl2ai -- ...` (Claude Code writes its own settings) | the folder you opened Claude Code in, when it holds Excel files -- no path needed |
+| Codex CLI | adds `[mcp_servers.xl2ai]` to `~/.codex/config.toml` (other settings untouched, `.bak` kept) | same: the folder you started Codex in |
+| Claude Desktop | adds `xl2ai` to `mcpServers` in `claude_desktop_config.json` (`%APPDATA%\Claude`); restart the app | no folder of its own: tell it the path ("the files are in D:/Sales Files") and it passes it to the tools |
+
+Pin one folder for all of them with `--workspace "D:/Sales Files"`. To do it by hand instead,
+
 ```
 python -m xl2ai connect --workspace "D:/Sales Files"
 ```
 
-prints the exact settings for your agent host:
+prints the exact settings for each host:
 
 * **Claude Code**: `claude mcp add xl2ai -- python -m xl2ai serve --workspace "D:/Sales Files"`
 * **Claude Desktop / Cursor / other MCP clients**: paste the printed `mcpServers` JSON into the client's MCP settings.
