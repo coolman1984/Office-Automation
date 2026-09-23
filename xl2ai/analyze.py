@@ -212,8 +212,9 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                 cols = con.execute("""SELECT column_id,name,sql_type,kind,non_null,error_cells,original_header
                                       FROM _columns WHERE table_id=? ORDER BY position""", (table_id,)).fetchall()
                 candidate_cols = []
-                # "mixed" too: a "Total" label typed into a numeric id column is exactly what makes it mixed
-                text_columns = [c[1] for c in cols if c[3] in ("text", "mixed")]
+                # every column that can hold text: a "Total" label typed into a numeric id column makes it mixed,
+                # and one typed into a date column sits among dates stored as text -- both were missed before
+                text_columns = [c[1] for c in cols if c[3] in ("text", "mixed", "date")]
                 generated_headers = sum(1 for c in cols if c[6] is None)
                 if cols and generated_headers / len(cols) >= 0.5:
                     _add_finding(con, "DQ_HEADER_LOW_CONFIDENCE", "warn", table_id, None, generated_headers, [],

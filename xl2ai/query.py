@@ -562,6 +562,12 @@ def sql(cfg, source_id, statement, run_id=None):
     if not (low.startswith("select") or low.startswith("with")) or ";" in s.rstrip(";"):
         raise Xl2aiError("E_NOT_ALLOWED","SQL must be exactly one SELECT/WITH statement")
     with _catalog(catp) as cat:
+        flagged={}
+        if cat.execute("SELECT 1 FROM sqlite_master WHERE name='_row_flags'").fetchone():
+            for sid_,tname,xl in cat.execute("""SELECT t.source_id,t.table_name,f.xl_row FROM _row_flags f
+                                                JOIN _tables t ON t.table_id=f.table_id
+                                                WHERE f.flag='totals_candidate'"""):
+                flagged.setdefault((sid_,tname),[]).append(int(xl))
         if source_id=="*":
             rows=cat.execute("SELECT source_id,db_rel FROM _sources ORDER BY source_id").fetchall()
         else:
@@ -569,14 +575,17 @@ def sql(cfg, source_id, statement, run_id=None):
     if not rows or (source_id!="*" and len(rows)!=1):
         raise Xl2aiError("E_STAGE_INPUT",f"source not found: {source_id}","use a source_id from query schema, or \"*\"")
     hint=""
+    usable=[]
     if source_id=="*":
         src=sqlite3.connect("file::memory:",uri=True)
         aliases=[]
+        sid_of={}
         for sid,db_rel in rows:
             path=os.path.abspath(os.path.join(run_dir,db_rel.replace("/",os.sep)))
             alias=source_alias(sid)
             src.execute("ATTACH DATABASE ? AS "+q(alias),(f"file:{path}?mode=ro",))
             aliases.append(alias)
+            sid_of[alias]=sid
         # plain names work too: every table name that exists in exactly one workbook gets a temp view, so
         # "SELECT ... FROM Orders JOIN Customers ..." needs no aliases at all (created before the authorizer)
         seen={}
@@ -585,10 +594,18 @@ def sql(cfg, source_id, statement, run_id=None):
                                        "WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\'"):
                 seen.setdefault(name.lower(),[]).append((alias,name))
         ambiguous=[]
+        cleaned=[]
         for key,where in seen.items():
             if len(where)==1:
                 alias,name=where[0]
-                src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM {q(alias)}.{q(name)}")
+                # the plain name is the clean table: rows flagged as totals/subtotals are left out, so a SUM is
+                # never double-counted by accident; <alias>.<table> still reads every stored row
+                skip=flagged.get((sid_of[alias],name))
+                cond=f" WHERE _xl_row NOT IN ({','.join(map(str,skip))})" if skip else ""
+                src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM {q(alias)}.{q(name)}{cond}")
+                usable.append(name)
+                if skip:
+                    cleaned.append(f"{name} (-{len(skip)})")
             else:
                 # never let SQLite silently pick one workbook's table: the plain name fails, naming the fix
                 name=where[0][1]
@@ -596,7 +613,10 @@ def sql(cfg, source_id, statement, run_id=None):
                 choices=" or ".join(f"{a}.{n}" for a,n in where)
                 src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM "
                             f"{q(f'ambiguous name {name}: it exists in several workbooks - write {choices}')}")
-        hint=("tables usable by plain name; also qualified as <alias>.<table> with aliases: "+", ".join(aliases)
+        hint=("tables usable by plain name"
+              +(f" -- totals rows already left out of: {', '.join(cleaned)} (raw rows via <alias>.<table>)"
+                if cleaned else "")
+              +"; also qualified as <alias>.<table> with aliases: "+", ".join(aliases)
               +(f"; qualify these (name in several workbooks): {', '.join(sorted(ambiguous))}" if ambiguous else ""))
     else:
         src=sqlite3.connect(f"file:{os.path.abspath(os.path.join(run_dir,rows[0][1].replace('/',os.sep)))}?mode=ro",
@@ -610,7 +630,11 @@ def sql(cfg, source_id, statement, run_id=None):
             cur=src.execute(s.rstrip(";"))
             columns,data,truncated=_cap_rows(cur,cfg)
         except sqlite3.DatabaseError as e:
-            raise Xl2aiError("E_NOT_ALLOWED",f"query rejected: {e}") from None
+            fix=""
+            if "no such table" in str(e) and source_id=="*":
+                fix=("table names to use: "+", ".join(sorted(usable)[:30])
+                     +" (a source_id or table_id is not a table name; qualified form is <alias>.<table>)")
+            raise Xl2aiError("E_NOT_ALLOWED",f"query rejected: {e}",fix) from None
     finally:
         src.close()
     return _envelope("sql",columns,data,started,cfg,evidence=[{"run_id":rid,"source_id":source_id}],

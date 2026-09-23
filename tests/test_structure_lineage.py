@@ -157,3 +157,40 @@ class TestBuildLineage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExcelEngineFormulaRefs(unittest.TestCase):
+    """record_formula_refs against a fake Excel: one COM read per block, distinct R1C1 formulas parsed once."""
+
+    def test_counts_references_per_sheet(self):
+        from xl2ai.extract.sheet import record_formula_refs
+
+        class Rng:
+            def __init__(self, vals):
+                self.FormulaR1C1 = vals
+
+        class Ws:
+            def Cells(self, r, c):
+                return (r, c)
+
+            def Range(self, a, b):
+                n = b[0] - a[0] + 1
+                col = [("='Raw Data'!R[0]C[2]*2",)] * (n - 1) + [(5.0,)]      # last row typed over: a value
+                return Rng(tuple(col))
+
+        class Sess:
+            calls = 0
+
+            def call(self, fn):
+                Sess.calls += 1
+                return fn()
+
+        class Plan:
+            xl_col, name = 3, "amount"
+
+        con = sqlite3.connect(":memory:")
+        con.execute("CREATE TABLE _formula_refs (table_name, sql_name, ref_workbook, ref_sheet, cells, sample)")
+        record_formula_refs(Sess(), Ws(), con, "Report", Plan(), 2, 11)
+        self.assertEqual(con.execute("SELECT ref_workbook, ref_sheet, cells FROM _formula_refs").fetchall(),
+                         [(None, "Raw Data", 9)])
+        self.assertEqual(Sess.calls, 1)

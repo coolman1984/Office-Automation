@@ -173,6 +173,15 @@ def build_reconciliation(cfg, run_id, catalog_path=None):
                 cols = [d[0] for d in cur.description]
                 rep_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
             rep_cols = [c for c in cols if c != "_xl_row"]
+            # a sheet holding several tables is checked one table at a time: mixing a by-branch table with a
+            # by-category table would dilute every label match below the threshold
+            groups = [(None, rep_rows)]
+            regions = con.execute("""SELECT region_no, first_row, last_row, header_row FROM _regions
+                                     WHERE table_id=? AND kind='table' ORDER BY region_no""", (r_id,)).fetchall() \
+                if con.execute("SELECT 1 FROM sqlite_master WHERE name='_regions'").fetchone() else []
+            if len(regions) > 1:
+                groups = [(no, [r for r in rep_rows if lo <= r["_xl_row"] <= hi and r["_xl_row"] != hdr])
+                          for no, lo, hi, hdr in regions]
             best_per_col = {}
             for s_id, s_table, s_db, _ in cands:
                 s_measures, s_dims = _measures(con, s_id), _dims(con, s_id)
@@ -181,14 +190,17 @@ def build_reconciliation(cfg, run_id, catalog_path=None):
                 excluded = [x for x, in con.execute(
                     "SELECT DISTINCT xl_row FROM _row_flags WHERE table_id=? AND flag='totals_candidate'", (s_id,))]
                 with _source_db(run_dir, s_db) as src:
-                    for col, lab, dim, m, agg, compared, matched, bad, sql in _reconcile_pair(
-                            rep_rows, rep_cols, src, s_table, s_dims, s_measures, excluded):
-                        prev = best_per_col.get(col)
-                        if prev is None or matched > prev[6]:
-                            best_per_col[col] = (s_id, lab, dim, m, agg, compared, matched, bad, sql)
-            for col, (s_id, lab, dim, m, agg, compared, matched, bad, sql) in best_per_col.items():
+                    for region_no, rows in groups:
+                        for col, lab, dim, m, agg, compared, matched, bad, sql in _reconcile_pair(
+                                rows, rep_cols, src, s_table, s_dims, s_measures, excluded):
+                            prev = best_per_col.get((region_no, col))
+                            if prev is None or matched > prev[6]:
+                                best_per_col[(region_no, col)] = (s_id, lab, dim, m, agg, compared, matched, bad, sql)
+            for (region_no, col), (s_id, lab, dim, m, agg, compared, matched, bad, sql) in best_per_col.items():
                 status = "reconciled" if matched == compared else "partial"
-                rid = hashlib.sha1(f"{r_id}|{col}".encode()).hexdigest()[:20]
+                rid = hashlib.sha1(f"{r_id}|{region_no}|{col}".encode()).hexdigest()[:20]
+                if region_no is not None:
+                    lab = f"{lab} (region {region_no})"
                 out.append((rid, r_id, col, lab, s_id, m, dim, agg, compared, matched, status,
                             json.dumps(bad[:10], ensure_ascii=False, default=str), sql))
         con.executemany("INSERT OR REPLACE INTO _reconciliation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", out)

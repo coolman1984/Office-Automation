@@ -734,6 +734,11 @@ def process_file_direct(src, db_path, opts):
         msg = "The file is password protected (Office encryption). Remove the password and try again."
         log("ERROR", msg)
         return 1, [], msg
+    if kind == "other" and not src.lower().endswith(".xls"):
+        with open(src, "rb") as f:
+            head = f.read(8)
+        if not head.startswith(bytes.fromhex("D0CF11E0")):
+            kind = "drm"                          # not a zip, not OLE: a wrapper (rights management) only Excel opens
     if kind == "drm":
         msg = ("DRM-wrapped file: only Excel's rights-management agent can open it. Use the Excel engine "
                "(Windows + Excel, [extract] engine = \"excel\" or \"auto\").")

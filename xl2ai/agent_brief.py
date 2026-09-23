@@ -142,6 +142,10 @@ def build_agent_brief(cfg, run_id, catalog_path=None, in_progress=False):
         lines.extend(_render_changes(con))
         lines.append("")
 
+        from .query import source_alias
+        name_counts = {}
+        for t in brief_out["tables"]:
+            name_counts[t["table_name"].lower()] = name_counts.get(t["table_name"].lower(), 0) + 1
         lines.append("## Tables")
         for t in brief_out["tables"]:
             tid = t["table_id"]
@@ -151,6 +155,8 @@ def build_agent_brief(cfg, run_id, catalog_path=None, in_progress=False):
                 grain_desc = row[0] if row else None
             lines.append(f"### {t['table_name']} (`{tid}`) -- {t['sheet']} -- {t['rows']:,} rows"
                         + (f" -- kind: {t['kind']}" if t.get("kind") else ""))
+            lines.append("In SQL (query across all files): `" + (t["table_name"] if name_counts[t["table_name"].lower()] == 1
+                         else f"{source_alias(t['source_id'])}.{t['table_name']}") + "`")
             if grain_desc:
                 lines.append(f"Grain: {grain_desc}")
             if t["readiness"] != "ready":

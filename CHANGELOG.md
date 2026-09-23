@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 0.13.2 - Fixes found by a real agent session; Excel engine safe under the agent connection (2026-09-23)
+
+A real Claude Code session (MCP tools only, file tools blocked) was run on a realistic folder: 18k-row sales
+workbook with a pasted grand-total row and an entry error, customers and products workbooks, and a management
+report with one wrong branch figure. It answered everything correctly, but only by working around the tool. Fixed:
+
+* **Excel engine under `prepare`**: COM is now initialised per calling thread (`process_file_excel`). `prepare`
+  runs the refresh in a background thread, where COM refuses every call from a thread that did not initialise it --
+  every agent-started build of a DRM/Excel-engine folder would have failed on Windows.
+* **Grand-total rows missed**: a "Total" label typed into a *date* column was not checked, so the key-number total
+  of the sales table came out doubled. Totals detection now covers date columns, and the digest adds a safety net: a
+  row whose amount equals the sum of every other row, with at least half its cells empty, is flagged whatever its
+  label says.
+* **Report check missed a wrong figure**: a report sheet holding two stacked tables was compared as one, diluting
+  label matches. Reconciliation now checks one region at a time; the wrong branch is found automatically.
+* **Plain table names are clean**: in cross-file SQL (`query sql "*"`, MCP `query`) a plain table name leaves out
+  rows flagged as totals, so an agent's own SUM cannot double-count; `<alias>.<table>` still reads every row.
+* **Name guessing**: the agent brief states each table's SQL name, and a "no such table" error lists the usable
+  names (the agent had tried source ids as table names five times).
+* **Formula lineage on the Excel engine** now reads every formula of a formula column (R1C1 text, one COM call per
+  200k rows, distinct formulas parsed once) instead of one sample; an Excel crash during that probe is no longer
+  swallowed. The direct engine reports files that are neither zip nor OLE as rights-managed, with the reason.
+
+Measured on the same questions before/after: 29 -> 21 agent turns, cost 0.40 -> 0.21 USD, 92 -> 65 s, no failed
+tool calls from wrong table names.
+
 ## 0.13.1 - One-command connection to Claude Code, Codex CLI and Claude Desktop (2026-09-23)
 
 * `xl2ai connect --install all|claude-code|codex|claude-desktop [--workspace] [--dry-run]` (`xl2ai/connectors.py`):

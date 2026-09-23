@@ -39,6 +39,21 @@ def process_file(src, db_path, opts):
 
 
 def process_file_excel(src, db_path, opts):
+    """Excel engine. COM is initialised for the calling thread: the agent connection runs a refresh in a
+    background thread, and COM refuses every call from a thread that did not initialise it."""
+    if os.name != "nt" or not PYWIN32_AVAILABLE:
+        return _process_file_excel(src, db_path, opts)
+    from .common import pythoncom
+    pythoncom.CoInitialize()
+    try:
+        return _process_file_excel(src, db_path, opts)
+    finally:
+        import gc
+        gc.collect()                                  # release every COM proxy before leaving the apartment
+        pythoncom.CoUninitialize()
+
+
+def _process_file_excel(src, db_path, opts):
     t_run = time.perf_counter()
     if os.name != "nt" or not PYWIN32_AVAILABLE:
         # Say so plainly. Without this the COM objects are all None and the first failure surfaces as an

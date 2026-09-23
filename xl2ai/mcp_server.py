@@ -96,9 +96,10 @@ TOOLS = [
            "sample_rows": {"type": "integer", "minimum": 0, "maximum": 50, "description": "Default 5."}},
           required=("table",)),
     _tool("query", "Read-only SQL across all files",
-          "Runs one SELECT/WITH over every workbook at once (SQLite dialect). Plain table names work when unique; "
-          "otherwise qualify as <alias>.<table> (aliases are listed in the answer). Every table has _xl_row (the "
-          "Excel row) for evidence. Results are capped; aggregate in SQL rather than fetching rows.",
+          "Runs one SELECT/WITH over every workbook at once (SQLite dialect). Plain table names work when unique and "
+          "already leave out rows flagged as totals/subtotals, so SUMs are safe; <alias>.<table> reads every stored "
+          "row. Every table has _xl_row (the Excel row) for evidence. Results are capped; aggregate in SQL rather "
+          "than fetching rows.",
           {"sql": {"type": "string"},
            "max_rows": {"type": "integer", "minimum": 1, "maximum": 500,
                         "description": "Row cap for this call (default: the workspace setting, usually 50)."}},

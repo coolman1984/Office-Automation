@@ -132,6 +132,37 @@ def _digest_table(con, src, table_id, table, measures, dims, date_col, excluded)
     return len(rows_out)
 
 
+def _sum_rows(con, src, table_id, table, measures, excluded):
+    """Rows whose amount equals the sum of every other row: a grand-total row, whatever its label says.
+
+    Checked only on the largest value of each additive measure, and only when that row leaves at least half of its
+    cells empty (a totals row carries a label and numbers, not a full record) -- so a genuine big sale cannot match.
+    Recorded as `totals_candidate` flags with the reason, like label-based ones.
+    """
+    found = []
+    ncols = src.execute(f"SELECT COUNT(*) FROM pragma_table_info('{table.replace(chr(39), chr(39) * 2)}')").fetchone()[0]
+    for name, _ in measures:
+        if not _additive(name):
+            continue
+        skip = f"AND _xl_row NOT IN ({','.join(str(int(x)) for x in excluded + found)})" if excluded + found else ""
+        row = src.execute(f"SELECT _xl_row, {q(name)} FROM {q(table)} WHERE typeof({q(name)}) IN ('integer','real') "
+                          f"{skip} ORDER BY {q(name)} DESC LIMIT 1").fetchone()
+        if not row or not row[1] or row[1] <= 0:
+            continue
+        xl_row, top = row
+        rest = src.execute(f"SELECT TOTAL({q(name)}), COUNT({q(name)}) FROM {q(table)} WHERE _xl_row <> ? {skip}",
+                           (xl_row,)).fetchone()
+        if rest[1] < 2 or abs(top - rest[0]) > 0.005 * abs(top):
+            continue
+        filled = src.execute(f"SELECT * FROM {q(table)} WHERE _xl_row=?", (xl_row,)).fetchone()
+        empties = sum(v is None for v in filled[1:])
+        if empties * 2 >= max(1, ncols - 1):
+            found.append(xl_row)
+            con.execute("INSERT OR REPLACE INTO _row_flags VALUES (?,?,?,?)",
+                        (table_id, int(xl_row), "totals_candidate", f"{name} equals the sum of all other rows"))
+    return found
+
+
 def build_digest(cfg, run_id, catalog_path=None):
     run_dir = os.path.join(cfg.runs_dir, run_id)
     path = catalog_path or os.path.join(run_dir, "catalog.db")
@@ -172,6 +203,8 @@ def build_digest(cfg, run_id, catalog_path=None):
                 continue
             with ro_connection(os.path.join(run_dir, db_rel.replace("/", os.sep))) as src:
                 try:
+                    extra = _sum_rows(con, src, table_id, table, measures, excluded)
+                    excluded = excluded + extra
                     _digest_table(con, src, table_id, table, measures, dims, date_col, excluded)
                     status, reason = "computed", None
                 except sqlite3.DatabaseError as e:

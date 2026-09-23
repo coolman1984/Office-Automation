@@ -47,6 +47,39 @@ def write_structure(con, res):
                          res.header_groups_method))
 
 
+FORMULA_ROWS_PER_READ = 200_000
+MAX_DISTINCT_FORMULAS = 20_000
+
+
+def record_formula_refs(sess, ws, con, table, plan, data_first, last_row):
+    """Every formula of one column, read as R1C1 text in large blocks (one COM call per block, like values).
+
+    In R1C1 form a column filled down has one identical formula text on every row, so the distinct set is tiny
+    and each is parsed once. Writes `_formula_refs` (sheets/workbooks referenced, with cell counts) -- the same
+    table the direct engine fills, so lineage is complete for Excel-engine workbooks too, not a one-cell sample.
+    """
+    from ..lineage import formula_refs
+    counts, first = {}, None
+    for r0 in range(data_first, last_row + 1, FORMULA_ROWS_PER_READ):
+        r1 = min(last_row, r0 + FORMULA_ROWS_PER_READ - 1)
+        vals = sess.call(lambda: ws.Range(ws.Cells(r0, plan.xl_col), ws.Cells(r1, plan.xl_col)).FormulaR1C1)
+        rows = vals if isinstance(vals, tuple) else ((vals,),)
+        for row in rows:
+            f = row[0] if isinstance(row, tuple) else row
+            if isinstance(f, str) and f.startswith("="):
+                counts[f] = counts.get(f, 0) + 1
+                if len(counts) > MAX_DISTINCT_FORMULAS:
+                    break
+    refs = {}
+    for f, n in counts.items():
+        first = first or f
+        for key in formula_refs(f):
+            refs[key] = refs.get(key, 0) + n
+    for (book, sheet), n in refs.items():
+        con.execute("INSERT INTO _formula_refs VALUES (?,?,?,?,?,?)",
+                    (table, plan.name, book, sheet, n, (first or "")[:200]))
+
+
 def iter_data(blocks, data_first, counters):
     """Yield (xl_rows, columns) per block, skipping header/preamble rows and fully blank rows."""
     for r0, blk in blocks:
@@ -241,8 +274,16 @@ def extract_sheet(sess, idx, con, res, opts, budget):
                 formula_cells = sess.call(lambda: col_rng.SpecialCells(XL_FORMULAS))
                 sample = sess.call(lambda: formula_cells.Cells(1, 1).FormulaR1C1)
                 con.execute("INSERT INTO _formulas VALUES (?,?,?,?)", (table, p.name, 1, str(sample)[:200]))
+            except ExcelDied:
+                raise
             except Exception:
                 continue
+            try:
+                record_formula_refs(sess, ws, con, table, p, data_first, lr)
+            except ExcelDied:
+                raise
+            except Exception as e:                  # lineage is a bonus; the sample above already stands
+                log("WARN", f"  formula references of '{p.name}' not read: {e}")
     for area, val in merged:
         con.execute("INSERT INTO _merged_areas VALUES (?,?,?)", (res.sheet_name, area, val))
     write_structure(con, res)
