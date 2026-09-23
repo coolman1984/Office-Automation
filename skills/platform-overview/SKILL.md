@@ -37,7 +37,8 @@ exist yet — check `ARCHITECTURE.md` roadmap and `AGENT_READINESS_PLAN.md` befo
 - `rules` — deterministic business rules and KPIs from human-authored packs
 - `changes` — run-to-run diff: schema, volume, values, categories, distributions, KPIs, row multisets
 - `pack` — the compact, token-budgeted AI context pack (`ai/context_pack.md` / `.json`)
-- `query` — read-only, capped tools: `schema describe sample repaired aggregate meta region compare trace sql`
+- `query` — read-only, capped tools: `schema describe sample repaired aggregate meta region find digest compare trace sql` (`sql "*"` joins across files)
+- `digest` — pre-computed key numbers per data table (totals, biggest groups, monthly trend), each with its SQL
 - `refresh` — runs every stage above into a new run, promotes it only if it earned it
 - `watch` / `diagnose` — live progress view and post-run failure diagnosis
 - `status` / `report` / `doctor` / `audit` / `brief` / `agent-brief` — health, freshness and orientation

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -206,8 +207,9 @@ def aggregate(cfg, selector, column, op="count", group_by=None, run_id=None):
 
 META_SECTIONS = {"relationships", "definitions", "kpis", "rules", "quality", "keys", "unsupported",
                  "table_kind", "row_flags", "column_roles", "grain", "time_coverage", "duplicates", "repairs",
-                 "regions", "header_groups", "lineage"}
-NEWER_SECTIONS = {"regions": "_regions", "header_groups": "_header_groups", "lineage": "_lineage"}
+                 "regions", "header_groups", "lineage", "digest"}
+NEWER_SECTIONS = {"regions": "_regions", "header_groups": "_header_groups", "lineage": "_lineage",
+                  "digest": "_digest_tables"}
 
 
 def meta(cfg, section, run_id=None):
@@ -280,6 +282,9 @@ def meta(cfg, section, run_id=None):
                                       l.status,l.cells,l.method,l.sample
                                FROM _lineage l LEFT JOIN _columns c ON c.column_id=l.column_id
                                ORDER BY l.table_id,c.position,l.ref_sheet""")
+        elif section=="digest":
+            cur=cat.execute("""SELECT table_id,status,reason,excluded_rows,measures_json,dims_json,date_column
+                               FROM _digest_tables ORDER BY table_id""")
         elif section=="repairs":
             cur=cat.execute("""SELECT table_id,column_id,xl_row,original_value,repaired_value,rule
                                FROM _repairs ORDER BY table_id,xl_row""")
@@ -298,6 +303,7 @@ def meta(cfg, section, run_id=None):
         "grain":{"columns_json"},
         "duplicates":{"evidence"},
         "header_groups":{"path"},
+        "digest":{"measures_json","dims_json"},
     }.get(section,set())
     if json_cols:
         indexes={name:i for i,name in enumerate(columns)}
@@ -366,6 +372,133 @@ def region(cfg, selector, region_no, limit=None, run_id=None):
                      hint=f"region {region_no} ({kind}) of {sheet}; column names come from its own header row")
 
 
+_AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي", "ؤ": "و", "ئ": "ي",
+                          "ـ": None, "_": " ", "-": " "})
+_AR_MARKS = re.compile("[\u064B-\u0652\u0670]")
+
+
+def fold(text):
+    """Search normal form: case-folded, Arabic letter variants and diacritics unified, _/- as spaces."""
+    if text is None:
+        return ""
+    return " ".join(_AR_MARKS.sub("", str(text).casefold()).translate(_AR_FOLD).split())
+
+
+def find(cfg, text, values=False, run_id=None):
+    """Where does a concept live? Names, headers, group labels, definitions and known values -- in one call.
+
+    Matching is case-insensitive and forgiving of Arabic spelling variants (أ/إ/ا, ة/ه, ى/ي, diacritics). With
+    `values`, every text column of every source is also searched (bounded by a time budget; the hint says how
+    much was covered), so "which table mentions customer X" is one call, not one query per table.
+    """
+    started=time.perf_counter()
+    rid,run_dir,catp=_run_paths(cfg,run_id)
+    needle=fold(text)
+    if not needle:
+        raise Xl2aiError("E_STAGE_INPUT","empty search text")
+    hits=[]
+
+    def hit(kind,table_id,column,matched,detail,exact):
+        hits.append((0 if exact else 1,kind,table_id,column,matched,detail))
+
+    with _catalog(catp) as cat:
+        present={r[0] for r in cat.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables=cat.execute("SELECT table_id,source_id,sheet_name,table_name,db_rel,row_count FROM _tables").fetchall()
+        for tid,sid,sheet,tname,_,nrows in tables:
+            for label in {sheet,tname}:
+                f=fold(label)
+                if needle in f:
+                    hit("table",tid,None,label,f"{nrows:,} rows in {sid}",f==needle)
+                    break
+        for cid,tid,name,header in cat.execute("SELECT column_id,table_id,name,original_header FROM _columns"):
+            for label in (name,header):
+                f=fold(label)
+                if label and needle in f:
+                    hit("column",tid,name,label,"column name/header",f==needle)
+                    break
+        if "_header_groups" in present:
+            for tid,name,path in cat.execute("""SELECT g.table_id,c.name,g.path FROM _header_groups g
+                                               JOIN _columns c ON c.column_id=g.column_id"""):
+                for label in json.loads(path or "[]"):
+                    if needle in fold(label):
+                        hit("column_group",tid,name,label,"group header above this column",fold(label)==needle)
+                        break
+        for term,meaning,applies in cat.execute("SELECT term,meaning,applies_to FROM _dictionary"):
+            if needle in fold(term) or needle in fold(meaning):
+                hit("definition",None,applies,term,meaning,fold(term)==needle)
+        for cid,tid,name,top_k,sample in cat.execute(
+                """SELECT c.column_id,c.table_id,c.name,p.top_k,p.sample FROM _columns c
+                   JOIN _profile_columns p ON p.column_id=c.column_id"""):
+            seen=set()
+            for v in [x[0] for x in json.loads(top_k or "[]") if isinstance(x,list) and x]+json.loads(sample or "[]"):
+                f=fold(v)
+                if v is not None and needle in f and f not in seen:
+                    seen.add(f)
+                    hit("value",tid,name,str(v),"a frequent/sample value of this column",f==needle)
+    covered=total_cols=0
+    if values:
+        budget=time.monotonic()+cfg.ai["query_timeout"]*4
+        with _catalog(catp) as cat:
+            text_cols={}
+            for tid,name in cat.execute("""SELECT table_id,name FROM _columns
+                                           WHERE upper(sql_type) IN ('TEXT','BLOB','ANY') ORDER BY table_id,position"""):
+                text_cols.setdefault(tid,[]).append(name)
+        total_cols=sum(len(v) for v in text_cols.values())
+        for tid,sid,sheet,tname,db_rel,_ in tables:
+            cols=text_cols.get(tid,[])
+            if not cols or time.monotonic()>budget:
+                continue
+            with _source_db(run_dir,db_rel) as src:
+                src.create_function("xfold",1,fold,deterministic=True)
+                src.set_progress_handler(lambda:1 if time.monotonic()>budget else 0,5000)
+                for name in cols:
+                    try:
+                        n,example,row=src.execute(
+                            f"SELECT COUNT(*),MIN({q(name)}),MIN(_xl_row) FROM {q(tname)} "
+                            f"WHERE instr(xfold({q(name)}),?)>0",(needle,)).fetchone()
+                    except sqlite3.DatabaseError:
+                        break                                   # time budget reached mid-query
+                    covered+=1
+                    if n:
+                        hit("data",tid,name,str(example),f"{n:,} row(s) contain it; first at Excel row {row}",
+                            fold(example)==needle)
+    order={"table":0,"column":1,"column_group":2,"definition":3,"value":4,"data":5}
+    hits.sort(key=lambda h:(h[0],order[h[1]],str(h[2]),str(h[3])))
+    rows=[[k,t,c,m,d] for _,k,t,c,m,d in hits]
+    rows,truncated=_cap_values(rows,cfg)
+    hint=(f"{len(hits)} match(es)"+("" if values else "; add --values to search every text cell too")
+          +(f"; searched {covered} of {total_cols} text columns" if values else ""))
+    return _envelope("find",["kind","table_id","column","matched","detail"],rows,started,cfg,
+                     evidence=[{"run_id":rid,"search":text}],total_rows=len(hits),truncated=truncated,hint=hint)
+
+
+def digest(cfg, selector, section=None, run_id=None):
+    """Pre-computed key numbers of one table (totals, biggest groups, monthly trend), each with its SQL."""
+    started=time.perf_counter()
+    rid,run_dir,catp=_run_paths(cfg,run_id)
+    with _catalog(catp) as cat:
+        tid,sid,sheet,table,db_rel=_resolve_table(cat,selector)
+        if not cat.execute("SELECT 1 FROM sqlite_master WHERE name='_digest_tables'").fetchone():
+            raise Xl2aiError("E_STAGE_INPUT","this run predates key numbers","run xl2ai refresh")
+        st=cat.execute("SELECT status,reason,excluded_rows FROM _digest_tables WHERE table_id=?",(tid,)).fetchone()
+        args=[tid]
+        where="table_id=?"
+        if section:
+            where+=" AND section=?"
+            args.append(section)
+        cur=cat.execute(f"""SELECT section,measure,dim,key,value,rows,share,rank FROM _digest WHERE {where}
+                            ORDER BY CASE section WHEN 'total' THEN 0 WHEN 'by_group' THEN 1 ELSE 2 END,
+                                     dim,rank,measure""",args)
+        columns,rows,truncated=_cap_rows(cur,cfg,row_limit=max(cfg.ai["query_rows"],60))
+        sqls=[r[0] for r in cat.execute(f"SELECT DISTINCT sql FROM _digest WHERE {where}",args)]
+    status,reason,excluded=st if st else ("missing",None,0)
+    hint=(f"status={status}" + (f" ({reason})" if reason else "") + f"; totals rows excluded={excluded}; "
+          f"re-run any number with: xl2ai query sql {sid} \"<one of evidence.sql>\"")
+    return _envelope("digest",columns,rows,started,cfg,
+                     evidence=[{"run_id":rid,"source_id":sid,"sheet":sheet,"table_id":tid,"sql":sqls[:12]}],
+                     truncated=truncated,hint=hint)
+
+
 def compare(cfg, kind=None, run_id=None):
     """Return the bounded run-to-run differences already computed by the deterministic change stage."""
     started=time.perf_counter()
@@ -396,7 +529,19 @@ def trace(cfg, selector, xl_row, run_id=None):
                      truncated=truncated)
 
 
+def source_alias(source_id):
+    """The schema name a source database is attached under for cross-file SQL (`query sql "*" ...`)."""
+    alias=re.sub(r"\W+","_",str(source_id)).strip("_") or "src"
+    return ("s_"+alias) if alias[0].isdigit() else alias
+
+
 def sql(cfg, source_id, statement, run_id=None):
+    """One read-only SELECT/WITH on one source database -- or, with source_id "*", on all of them at once.
+
+    With "*" every source database is attached read-only under `source_alias(source_id)`, so tables from different
+    workbooks can be joined in one statement: `SELECT ... FROM sales_ab12.Raw_Sales r JOIN customers_cd34.Customers c
+    ON c.customer_id = r.customer_id`. The same authorizer then forbids any further ATTACH, PRAGMA or write.
+    """
     started=time.perf_counter()
     rid,run_dir,catp=_run_paths(cfg,run_id)
     s=statement.strip()
@@ -404,10 +549,26 @@ def sql(cfg, source_id, statement, run_id=None):
     if not (low.startswith("select") or low.startswith("with")) or ";" in s.rstrip(";"):
         raise Xl2aiError("E_NOT_ALLOWED","SQL must be exactly one SELECT/WITH statement")
     with _catalog(catp) as cat:
-        rows=cat.execute("SELECT db_rel FROM _sources WHERE source_id=?",(source_id,)).fetchall()
-    if len(rows)!=1:
-        raise Xl2aiError("E_STAGE_INPUT",f"source not found: {source_id}")
-    with _source_db(run_dir,rows[0][0]) as src:
+        if source_id=="*":
+            rows=cat.execute("SELECT source_id,db_rel FROM _sources ORDER BY source_id").fetchall()
+        else:
+            rows=cat.execute("SELECT source_id,db_rel FROM _sources WHERE source_id=?",(source_id,)).fetchall()
+    if not rows or (source_id!="*" and len(rows)!=1):
+        raise Xl2aiError("E_STAGE_INPUT",f"source not found: {source_id}","use a source_id from query schema, or \"*\"")
+    hint=""
+    if source_id=="*":
+        src=sqlite3.connect("file::memory:",uri=True)
+        aliases=[]
+        for sid,db_rel in rows:
+            path=os.path.abspath(os.path.join(run_dir,db_rel.replace("/",os.sep)))
+            alias=source_alias(sid)
+            src.execute("ATTACH DATABASE ? AS "+q(alias),(f"file:{path}?mode=ro",))
+            aliases.append(alias)
+        hint="attached: "+", ".join(aliases)+" -- qualify tables as <alias>.<table>"
+    else:
+        src=sqlite3.connect(f"file:{os.path.abspath(os.path.join(run_dir,rows[0][1].replace('/',os.sep)))}?mode=ro",
+                            uri=True)
+    try:
         src.execute("PRAGMA query_only=ON")
         install_readonly_authorizer(src)
         deadline=time.monotonic()+cfg.ai["query_timeout"]
@@ -417,7 +578,10 @@ def sql(cfg, source_id, statement, run_id=None):
             columns,data,truncated=_cap_rows(cur,cfg)
         except sqlite3.DatabaseError as e:
             raise Xl2aiError("E_NOT_ALLOWED",f"query rejected: {e}") from None
-    return _envelope("sql",columns,data,started,cfg,evidence=[{"run_id":rid,"source_id":source_id}],truncated=truncated)
+    finally:
+        src.close()
+    return _envelope("sql",columns,data,started,cfg,evidence=[{"run_id":rid,"source_id":source_id}],
+                     truncated=truncated,hint=hint)
 
 
 def _print(obj):
@@ -445,6 +609,12 @@ def main(argv=None):
     a.add_argument("--group-by")
     m=sub.add_parser("meta")
     m.add_argument("section",choices=sorted(META_SECTIONS))
+    fd=sub.add_parser("find")
+    fd.add_argument("text")
+    fd.add_argument("--values",action="store_true",help="also search every text cell (time-bounded)")
+    dg=sub.add_parser("digest")
+    dg.add_argument("table")
+    dg.add_argument("--section",choices=("total","by_group","by_month"))
     rg=sub.add_parser("region")
     rg.add_argument("table")
     rg.add_argument("region_no",type=int)
@@ -472,6 +642,10 @@ def main(argv=None):
             out=aggregate(cfg,args.table,args.column,args.op,args.group_by,args.run)
         elif args.cmd=="meta":
             out=meta(cfg,args.section,args.run)
+        elif args.cmd=="find":
+            out=find(cfg,args.text,args.values,args.run)
+        elif args.cmd=="digest":
+            out=digest(cfg,args.table,args.section,args.run)
         elif args.cmd=="region":
             out=region(cfg,args.table,args.region_no,args.limit,args.run)
         elif args.cmd=="compare":

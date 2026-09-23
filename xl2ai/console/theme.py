@@ -25,6 +25,7 @@ STAGE_PURPOSE = {
     "repair": "suggest opt-in cleanup fixes, applied to nothing but _repairs",
     "rules": "apply pack knowledge, rules and KPIs",
     "relations": "infer relationships between tables",
+    "digest": "pre-compute key numbers: totals, biggest groups, monthly trends",
     "changes": "compare against the previous trusted run",
     "audit": "verify the run's artifacts agree with each other",
     "contextpack": "build the compact AI context pack",

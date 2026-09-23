@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 0.12.0 - Key numbers, find, cross-file joins, parallel extraction (2026-09-23)
+
+The theme: the questions every agent asks first on unfamiliar data -- "what are the big numbers", "where is X",
+"how do I combine these two files" -- are answered before it arrives, and extraction of many large files is faster.
+
+* **Key numbers** (new `digest` stage and `xl2ai digest`, catalog `_digest` / `_digest_tables`): for every plain
+  data table, totals/average/range of its amount columns, the ten biggest groups of each category column (with
+  share of total, plus an "other" remainder), and the month-by-month trend of its main date column -- each number
+  stored with the exact SQL that produced it, so it can be re-run with `query sql`. Honesty rules: flagged totals
+  rows are excluded (and counted); per-unit values (price, rate, average...) are averaged, never added up; ids and
+  codes are never measures; reports, dashboards and multi-table sheets are skipped with the reason. Shown in
+  `ai/agent_brief.md` ("Key numbers"), the context pack, `query digest <table> [--section]` and `query meta digest`.
+* **`xl2ai query find <text> [--values]`**: where a concept lives, in one call -- table/sheet names, column
+  names/headers, group headers, definitions and profiled values; `--values` also searches every text cell of every
+  source within a time budget and says how much it covered. Case-insensitive and forgiving of Arabic spelling
+  variants (أ/إ/آ/ا, ة/ه, ى/ي, diacritics, tatweel).
+* **Cross-file SQL**: `xl2ai query sql "*" "<SELECT>"` attaches every source database read-only (as
+  `<source alias>.<table>`) so tables from different workbooks join in one statement; the same authorizer, query-only
+  mode and caps apply. `ai/agent_brief.md` gained "How the tables connect": each relationship with its confidence
+  and a ready JOIN clause (cross-file aware).
+* **Parallel extraction** (direct engine): several changed workbooks are extracted at once in separate processes
+  (`[extract] workers`, 0 = auto, up to 4). The Excel engine stays one-at-a-time (one private Excel). Measured: three
+  57 MB workbooks (3M rows) in 39 s. `workers` does not affect the reuse fingerprint.
+* **Totals rows**: detection now also looks in mixed-type columns (a "Total" typed into a numeric id column is
+  exactly what makes it mixed -- previously missed) and accepts short labelled forms ("Cairo Total", "Total Q1",
+  "إجمالي القاهرة"), length-capped so sentences mentioning a total are not flagged.
+* **Column roles**: a repeating number named like an id (`customer_id` in an orders table) is now `code`, not
+  `quantity`, so it is never summed.
+* **Fix**: `ai/agent_brief.md` written by `refresh` always reported "stale" and "not promoted" gaps, because it was
+  judged against the previous run while its own run was still being built. The refresh stage now marks the brief as
+  in-progress and skips those two self-referential checks (a run is only promoted if every stage passes).
+
 ## 0.11.0 - A second extraction engine, report-shaped sheets, formula lineage (2026-09-22)
 
 **No output change for existing Excel-engine projects except three new, additive extract tables** (`_regions`,

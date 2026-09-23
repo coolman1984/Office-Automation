@@ -14,6 +14,9 @@ filter/group-by instead of assuming you saw everything.
 | You need to know | Run | Notes |
 |---|---|---|
 | "What's here at all?" | `xl2ai brief` | always first; see `skills/agent-start` |
+| "Where does X live?" (a name, a column, a customer, a product) | `xl2ai query find "<text>" [--values]` | one call across every file; `--values` searches every text cell too (time-bounded, the hint says how much was covered) |
+| "What are the big numbers of this table?" | `xl2ai query digest <table>` | totals, biggest groups, monthly trend -- pre-computed, each with its SQL; read these before writing any GROUP BY yourself |
+| "Combine two tables from different files" | `xl2ai query sql "*" "SELECT ... FROM <alias>.<table> JOIN <alias>.<table> ..."` | the JOIN to use is listed under "How the tables connect" in `ai/agent_brief.md` |
 | "What tables/columns exist?" | `xl2ai query schema` | lists every table with its columns; no row data |
 | "Tell me about this one table" | `xl2ai query describe <table>` | types, nulls, distinct, min/max, top-k, samples, quality/key counts |
 | "Show me some real rows" | `xl2ai query sample <table> [--limit N]` | capped; never the whole table |

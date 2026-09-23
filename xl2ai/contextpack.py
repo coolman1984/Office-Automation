@@ -99,6 +99,13 @@ def _render_markdown(p):
         lines += ["", "## Data-quality warnings"]
         for d in p["quality"]:
             lines.append(f"- {d['severity']} {d['code']} | {d['subject']} | {d['message']}")
+    if p.get("digest"):
+        lines += ["", "## Key numbers (pre-computed; totals rows excluded)"]
+        for x in p["digest"]:
+            tot = "; ".join(f"{m} {k} {v:,}" for m, d in x["totals"].items() for k, v in d.items())
+            top = "; ".join(f"{dim}: " + ", ".join(f"{k} {s:.0%}" if s is not None else str(k) for k, s in g)
+                            for dim, g in x["top"].items())
+            lines.append(f"- {x['table']} | {x['rows']:,} rows" + (f" | {tot}" if tot else "") + (f" | {top}" if top else ""))
     if p.get("lineage"):
         lines += ["", "## Computed from (formula lineage)"]
         for x in p["lineage"]:
@@ -230,6 +237,20 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                                "from": handles.get(target) or ((book + "!") if book else "") + (ref_sheet or ""),
                                "status": status},
                               budget_tokens, omitted, "lineage", state)
+        if "_digest" in present:
+            for tid, in con.execute("SELECT table_id FROM _digest_tables WHERE status='computed' ORDER BY table_id"):
+                item = {"table": handles.get(tid, tid), "rows": None, "totals": {}, "top": {}}
+                for measure, key, value in con.execute(
+                        "SELECT measure, key, value FROM _digest WHERE table_id=? AND section='total'", (tid,)):
+                    if measure == "*":
+                        item["rows"] = int(value)
+                    elif key in ("sum", "avg") and value is not None and (key == "sum" or measure not in item["totals"]):
+                        item["totals"][measure] = {"sum" if key == "sum" else "avg": round(value, 2)}
+                for dim, k, share in con.execute(
+                        """SELECT dim, key, share FROM _digest WHERE table_id=? AND section='by_group' AND rank<=3
+                           ORDER BY dim, rank""", (tid,)):
+                    item["top"].setdefault(dim, []).append([k, None if share is None else round(share, 3)])
+                _add_budgeted(payload, "digest", item, budget_tokens, omitted, "digest", state)
         if "_regions" in present:
             for tid, n in con.execute("""SELECT table_id, COUNT(*) FROM _regions WHERE kind='table'
                                          GROUP BY table_id HAVING COUNT(*) > 1 ORDER BY table_id"""):
@@ -250,7 +271,7 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                "columns":"query describe","relationships":"query meta relationships",
                "definitions":"query meta definitions","kpis":"query meta kpis","rules":"query meta rules",
                "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief",
-               "lineage":"query meta lineage","regions":"query meta regions"}
+               "lineage":"query meta lineage","regions":"query meta regions","digest":"query digest"}
         payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
                               for k,v in sorted(omitted.items()) if v]
         base = dict(payload)

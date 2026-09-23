@@ -37,6 +37,7 @@ STAGES = [
     ("repair", {"repair_suggestions": 0}),
     ("rules", {"failed_rules": 1, "rule_errors": 0}),
     ("relations", {"relationships": 3}),
+    ("digest", {"tables_summarised": 5}),
     ("changes", {"changes": 27}),
     ("audit", {"checks": 46, "issues": 0}),
     ("contextpack", {"est_tokens": 3820}),

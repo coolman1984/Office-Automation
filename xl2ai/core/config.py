@@ -18,7 +18,8 @@ DEFAULTS = {
     "environment": {"wrapper_prefixes": []},        # file prefixes of rights-management wrappers (Excel opens them)
     "refresh": {"allow_partial": False, "keep_runs": 3, "lock_stale_hours": 12},
     "extract": {"verify": True, "strict": False, "block_cells": 500_000, "cache_cells": 12_000_000,
-                "open_timeout": 180, "visible": False, "sheets": [], "engine": "auto"},
+                "open_timeout": 180, "visible": False, "sheets": [], "engine": "auto",
+                "workers": 0},
     "analysis": {"sample_values": 5, "top_k": 5, "relation_sample": 1000, "row_hash_max_rows": 200_000},
     "rules": {"packs": [], "block_on_error": False},
     "repair": {"enabled": False, "null_tokens": True, "category_consolidation": True, "text_coercion": True},
@@ -26,7 +27,7 @@ DEFAULTS = {
 }
 SOURCE_KEYS = {"path": str, "alias": str}
 MINIMUMS = {("refresh", "keep_runs"): 1, ("refresh", "lock_stale_hours"): 0, ("extract", "block_cells"): 1000,
-            ("extract", "cache_cells"): 0, ("extract", "open_timeout"): 5,
+            ("extract", "cache_cells"): 0, ("extract", "open_timeout"): 5, ("extract", "workers"): 0,
             ("analysis", "sample_values"): 1, ("analysis", "top_k"): 1, ("analysis", "relation_sample"): 10,
             ("analysis", "row_hash_max_rows"): 0, ("ai", "context_tokens"): 500, ("ai", "query_rows"): 1,
             ("ai", "query_bytes"): 256, ("ai", "query_timeout"): 1}
@@ -138,6 +139,7 @@ class Config:
         """
         from ..extract.pipeline import resolve_engine
         extract = dict(self.raw["extract"])
+        extract.pop("workers", None)          # how many run at once never changes what is extracted
         engine = resolve_engine(SimpleNamespace(engine=extract.pop("engine", "auto")))
         if engine != "excel":                 # the Excel engine keeps its pre-engine-setting fingerprint (reuse holds)
             extract["engine"] = engine

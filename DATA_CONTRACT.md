@@ -64,6 +64,8 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_duplicate_candidates` [built] | id, table_id_a, table_id_b, method, score, evidence -- cross-file, never same-workbook |
 | `_regions`, `_header_groups`, `_formula_refs` [built] | the extract tables above keyed by table_id / column_id |
 | `_lineage` [built] | id, table_id, column_id, ref_kind (`sheet\|workbook`), ref_workbook, ref_sheet, target_source_id, target_table_id, status (`resolved\|unresolved\|external`), cells, sample, method (`all_formulas\|formula_sample`) -- always `inferred`; own-sheet references are not lineage |
+| `_digest` [built] | id, table_id, section (`total\|by_group\|by_month`), measure (`*` = row count), dim, key, value, rows, share, rank, sql -- every number carries its reproducing SQL; totals rows excluded |
+| `_digest_tables` [built] | table_id, status (`computed\|skipped\|error`), reason, excluded_rows, measures_json, units_json, dims_json, date_column |
 | `_repairs` [built, opt-in] | id, table_id, column_id, xl_row, original_value, repaired_value, rule (`null_token\|category_consolidation\|text_as_number`) -- empty unless `[repair].enabled = true`; never written back to any data table |
 
 ## 4. Run manifest [phase 1] `manifest.json`

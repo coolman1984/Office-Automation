@@ -135,7 +135,7 @@ def stage_contextpack(run, st, cfg, ctx):
 
 def stage_agent_brief(run, st, cfg, ctx):
     from .agent_brief import build_agent_brief
-    path = build_agent_brief(cfg, run.id, ctx.get("catalog"))
+    path = build_agent_brief(cfg, run.id, ctx.get("catalog"), in_progress=True)
     st.artifact(path)
 
 
@@ -178,6 +178,17 @@ def stage_relations(run, st, cfg, ctx):
     st.detail("relationships", n)
 
 
+def stage_digest(run, st, cfg, ctx):
+    from .digest import build_digest
+    path = build_digest(cfg, run.id, ctx.get("catalog"))
+    with ro_connection(path) as con:
+        st.detail("tables_summarised",
+                  con.execute("SELECT COUNT(*) FROM _digest_tables WHERE status='computed'").fetchone()[0])
+        errors = con.execute("SELECT table_id, reason FROM _digest_tables WHERE status='error'").fetchall()
+    for tid, reason in errors:
+        st.warn(f"key numbers for {tid} could not be computed: {reason}")
+
+
 def stage_analyze(run, st, cfg, ctx):
     from .analyze import analyze_catalog
     path = analyze_catalog(cfg, run.id, ctx.get("catalog"))
@@ -205,10 +216,27 @@ def stage_catalog(run, st, cfg, ctx):
     ctx["catalog"] = path
 
 
+def _extract_worker(path, db, opts):
+    """Runs in a separate process (direct engine only): one workbook, output silenced, results sent back."""
+    from .core.log import silence
+    from .extract.direct import process_file_direct
+    silence(True)
+    return process_file_direct(path, db, opts)
+
+
+def _worker_count(cfg, opts, pending):
+    """How many workbooks to extract at once. The Excel engine is always one at a time (one private Excel)."""
+    from .extract.pipeline import resolve_engine
+    if resolve_engine(opts) != "direct" or len(pending) < 2:
+        return 1
+    wanted = cfg.extract.get("workers", 0) or min(4, os.cpu_count() or 1)
+    return max(1, min(wanted, len(pending)))
+
+
 def stage_extract(run, st, cfg, ctx):
     opts = cfg.extract_options()
-    per, codes = [], set()
-    process_file = None                              # COM is imported only when at least one workbook really changed
+    per, codes = {}, set()
+    pending = []
     for s in ctx["sources"]:
         db = run.path("extract", s["source_id"] + ".db")
         reusable = None if ctx.get("force_extract") else find_reusable_extraction(cfg, s)
@@ -222,30 +250,23 @@ def stage_extract(run, st, cfg, ctx):
                     "verify_mismatches": 0, "reused": True,
                     "reused_from_run": reusable["run_id"], "reuse_mode": mode}
             st.artifact(db)
-            per.append(info)
+            per[s["source_id"]] = info
             codes.add(0)
             BUS.emit(E.SOURCE_REUSED, "unchanged source; reused previous trusted extraction",
                      source_id=s["source_id"], from_run=reusable["run_id"], mode=mode)
             log("INFO", f"Reused unchanged source '{s['source_id']}' from run {reusable['run_id']} ({mode}); Excel not opened")
             continue
+        pending.append((s, db))
 
-        if process_file is None:
-            from .extract.pipeline import process_file as _process_file
-            process_file = _process_file
-        if not is_silent():
-            print(f"\n{'=' * 100}\n{s['path']}\n{'=' * 100}")
-        with BUS.scope(source_id=s["source_id"]):
-            BUS.emit(E.SOURCE_EXTRACT_START, s["source_id"], source_id=s["source_id"], path=s["path"])
-            started = time.perf_counter()
-            code, results, message = process_file(s["path"], db, opts)
-            for r in results:
-                BUS.emit(E.SHEET_END, r.message or "", level="error" if r.status == "error" else "info",
-                         name=r.sheet_name, status=r.status, rows=r.data_rows, columns=r.columns,
-                         seconds=round(r.total_sec, 3))
-            BUS.emit(E.SOURCE_EXTRACT_END, message or "",
-                     level="error" if code in (1, 3) else "info",
-                     source_id=s["source_id"], status="error" if code in (1, 3) else "extracted",
-                     exit_code=code, seconds=round(time.perf_counter() - started, 3))
+    def record(s, db, code, results, message, seconds):
+        for r in results:
+            BUS.emit(E.SHEET_END, r.message or "", level="error" if r.status == "error" else "info",
+                     name=r.sheet_name, status=r.status, rows=r.data_rows, columns=r.columns,
+                     seconds=round(r.total_sec, 3))
+        BUS.emit(E.SOURCE_EXTRACT_END, message or "",
+                 level="error" if code in (1, 3) else "info",
+                 source_id=s["source_id"], status="error" if code in (1, 3) else "extracted",
+                 exit_code=code, seconds=round(seconds, 3))
         codes.add(code)
         info = {"source_id": s["source_id"], "exit_code": code, "db": None, "message": message, "reused": False,
                 "sheets": {k: sum(r.status == k for r in results) for k in ("extracted", "skipped", "error")}}
@@ -256,11 +277,49 @@ def stage_extract(run, st, cfg, ctx):
                 meta = dict(con.execute("SELECT key, value FROM _meta").fetchall())
             info["verify_checks"] = int(meta.get("verify_checks", 0))
             info["verify_mismatches"] = int(meta.get("verify_mismatches", 0))
-        per.append(info)
+        per[s["source_id"]] = info
+
+    workers = _worker_count(cfg, opts, pending)
+    st.detail("workers", workers)
+    if workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        log("INFO", f"Extracting {len(pending)} workbooks, {workers} at a time (direct engine)")
+        started = {}
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {}
+            for s, db in pending:
+                with BUS.scope(source_id=s["source_id"]):
+                    BUS.emit(E.SOURCE_EXTRACT_START, s["source_id"], source_id=s["source_id"], path=s["path"])
+                started[s["source_id"]] = time.perf_counter()
+                futures[s["source_id"]] = (s, db, pool.submit(_extract_worker, s["path"], db, opts))
+            for sid, (s, db, fut) in futures.items():
+                with BUS.scope(source_id=sid):
+                    try:
+                        code, results, message = fut.result()
+                    except Exception as e:                    # a worker that died is that source's failure only
+                        code, results, message = 1, [], f"extraction worker failed: {type(e).__name__}: {e}"
+                    record(s, db, code, results, message, time.perf_counter() - started[sid])
+                if not is_silent():
+                    ok = sum(r.status == "extracted" for r in results)
+                    print(f"{s['path']}: {ok} sheet(s) extracted" + (f" | {message}" if message else ""), flush=True)
+    else:
+        process_file = None                          # COM is imported only when at least one workbook really changed
+        for s, db in pending:
+            if process_file is None:
+                from .extract.pipeline import process_file as _process_file
+                process_file = _process_file
+            if not is_silent():
+                print(f"\n{'=' * 100}\n{s['path']}\n{'=' * 100}")
+            with BUS.scope(source_id=s["source_id"]):
+                BUS.emit(E.SOURCE_EXTRACT_START, s["source_id"], source_id=s["source_id"], path=s["path"])
+                t0 = time.perf_counter()
+                code, results, message = process_file(s["path"], db, opts)
+                record(s, db, code, results, message, time.perf_counter() - t0)
+    per = [per[s["source_id"]] for s in ctx["sources"] if s["source_id"] in per]
     st.detail("sources", per)
     if 3 in codes:
         bad = [p["source_id"] for p in per if p["exit_code"] == 3]
-        st.fail("E_VERIFY_MISMATCH", "stored data differs from Excel for: " + ", ".join(bad),
+        st.fail("E_VERIFY_MISMATCH", "stored data did not verify against the workbook for: " + ", ".join(bad),
                 "see the _verification table in that database")
     elif 1 in codes:
         bad = [f"{p['source_id']} ({p['message']})" for p in per if p["exit_code"] == 1]
@@ -271,7 +330,8 @@ def stage_extract(run, st, cfg, ctx):
 
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
           ("analyze", stage_analyze), ("semantics", stage_semantics), ("repair", stage_repair),
-          ("rules", stage_rules), ("relations", stage_relations), ("changes", stage_changes),
+          ("rules", stage_rules), ("relations", stage_relations), ("digest", stage_digest),
+          ("changes", stage_changes),
           ("audit", stage_audit), ("contextpack", stage_contextpack), ("agent_brief", stage_agent_brief),
           ("report", stage_report))
 # rules runs before relations: pack-confirmed keys must exist in `_keys` before relation inference can use them

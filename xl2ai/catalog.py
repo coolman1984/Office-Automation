@@ -121,6 +121,15 @@ CREATE TABLE _lineage (
   id TEXT PRIMARY KEY, table_id TEXT NOT NULL, column_id TEXT, ref_kind TEXT, ref_workbook TEXT, ref_sheet TEXT,
   target_source_id TEXT, target_table_id TEXT, status TEXT, cells INTEGER, sample TEXT, method TEXT
 );
+CREATE TABLE _digest (
+  id TEXT PRIMARY KEY, table_id TEXT NOT NULL, section TEXT NOT NULL, measure TEXT, dim TEXT, key TEXT,
+  value REAL, rows INTEGER, share REAL, rank INTEGER, sql TEXT
+);
+CREATE INDEX idx_digest_table ON _digest(table_id, section, dim, rank);
+CREATE TABLE _digest_tables (
+  table_id TEXT PRIMARY KEY, status TEXT, reason TEXT, excluded_rows INTEGER, measures_json TEXT,
+  units_json TEXT, dims_json TEXT, date_column TEXT
+);
 CREATE INDEX idx_columns_table ON _columns(table_id);
 CREATE INDEX idx_unsupported_table ON _unsupported(table_id);
 CREATE INDEX idx_tables_source ON _tables(source_id);

@@ -33,6 +33,9 @@ Each table carries its own `readiness`:
   (`xl2ai query meta quality` for the findings, `xl2ai query describe <table>` for the column-level detail).
 - **`not_ready`** — stored data did not verify against Excel. Do not use it; say so rather than answering anyway.
 
+`ai/agent_brief.md` already holds each table's **key numbers** (totals, biggest groups, monthly trend) and
+**how the tables connect** (ready JOINs, across files too) -- read those before running any query of your own.
+
 Each table also carries `regions` (more than 1 = several tables in one sheet: read them with
 `xl2ai query region <table> <n>`, never aggregate the flattened wide table) and `feeds_from` (the sheets or
 workbooks its formulas pull from -- a report computed from another table is a view of it, not independent evidence).

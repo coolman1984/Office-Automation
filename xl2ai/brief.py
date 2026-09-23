@@ -27,8 +27,13 @@ def _table_columns(con, table):
         return set()
 
 
-def build_brief(cfg, run_id=None):
+def build_brief(cfg, run_id=None, in_progress=False):
+    """`in_progress`: the run is still being built (the refresh's own agent-brief stage). Its sources were
+    fingerprinted moments ago and it is promoted only if every stage passes, so "stale"/"not promoted" would
+    describe the build, not the data -- those two checks are skipped instead of reported as false gaps."""
     status, status_code = compute_status(cfg, deep=False)
+    if in_progress:
+        status = dict(status, sources_fresh=True)
     rid = run_id or current_run_id(cfg)
     out = {"project": cfg.project, "run_id": rid, "fresh": status.get("sources_fresh"),
            "status_code": status_code, "tables": [], "gaps": [], "next_commands": []}
@@ -116,7 +121,8 @@ def build_brief(cfg, run_id=None):
     if not status.get("sources_fresh"):
         out["gaps"].append({"kind": "stale", "message": "one or more sources changed since this run",
                             "detail": status.get("changes")})
-    if manifest.get("status") != "passed" or not manifest.get("promoted"):
+    unpromoted = not in_progress and (manifest.get("status") != "passed" or not manifest.get("promoted"))
+    if unpromoted:
         out["gaps"].append({"kind": "not_promoted", "message": f"run status is '{manifest.get('status')}'"})
     if rule_errors:
         out["gaps"].append({"kind": "rule_errors", "message": f"{rule_errors} rule(s) could not execute"})
@@ -165,7 +171,7 @@ def build_brief(cfg, run_id=None):
     if needs_review or not_ready:
         out["next_commands"].append("xl2ai query meta quality")
 
-    if not_ready or not status.get("sources_fresh") or manifest.get("status") != "passed" or not manifest.get("promoted"):
+    if not_ready or not status.get("sources_fresh") or unpromoted:
         code = 2
     elif needs_review or rule_errors or rule_failures:
         code = 1

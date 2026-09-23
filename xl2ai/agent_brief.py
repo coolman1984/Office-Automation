@@ -17,6 +17,7 @@ import argparse
 import sys
 
 from .brief import build_brief
+from .digest import digest_lines
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.fsutil import atomic_write_text
@@ -71,6 +72,27 @@ def _a1(row, col):
     return f"{letters}{row}"
 
 
+def _join_lines(con, limit=15):
+    """One line per relationship: what links to what, how sure, and the JOIN to use (cross-file aware)."""
+    from .query import q, source_alias
+    rows = con.execute("""SELECT r.status, r.containment, r.score, fc.name, ft.table_name, ft.source_id,
+                                 tc.name, tt.table_name, tt.source_id
+                          FROM _relationships r
+                          JOIN _columns fc ON fc.column_id = r.from_column JOIN _tables ft ON ft.table_id = fc.table_id
+                          JOIN _columns tc ON tc.column_id = r.to_column JOIN _tables tt ON tt.table_id = tc.table_id
+                          ORDER BY r.status DESC, r.score DESC LIMIT ?""", (limit,)).fetchall()
+    lines = []
+    for status, containment, score, fcol, ftab, fsrc, tcol, ttab, tsrc in rows:
+        same = fsrc == tsrc
+        a = q(ftab) if same else f"{source_alias(fsrc)}.{q(ftab)}"
+        b = q(ttab) if same else f"{source_alias(tsrc)}.{q(ttab)}"
+        how = "xl2ai query sql " + (fsrc if same else '"*"')
+        pct = f"{containment:.0%} of values found" if containment is not None else "declared"
+        lines.append(f"- `{ftab}.{fcol}` -> `{ttab}.{tcol}` ({status}, {pct}): "
+                     f"`FROM {a} a JOIN {b} b ON a.{q(fcol)} = b.{q(tcol)}` via `{how}`")
+    return lines
+
+
 def _column_lines(con, table_id):
     has_roles = con.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_column_roles'").fetchone()[0]
@@ -93,8 +115,8 @@ def _column_lines(con, table_id):
     return lines
 
 
-def build_agent_brief(cfg, run_id, catalog_path=None):
-    brief_out, _ = build_brief(cfg, run_id)
+def build_agent_brief(cfg, run_id, catalog_path=None, in_progress=False):
+    brief_out, _ = build_brief(cfg, run_id, in_progress=in_progress)
     run_dir = os.path.join(cfg.runs_dir, run_id)
     path = catalog_path or os.path.join(run_dir, "catalog.db")
     if not os.path.isfile(path):
@@ -146,8 +168,15 @@ def build_agent_brief(cfg, run_id, catalog_path=None):
                         "WHERE table_id=? AND kind='table' ORDER BY region_no", (tid,)):
                     lines.append(f"    - region {no}: {_a1(r0, c0)}:{_a1(r1, c1)}"
                                  + (f", header row {hdr}" if hdr else ", no header row"))
+            lines.extend(digest_lines(con, tid))
             lines.append("Columns:")
             lines.extend(_column_lines(con, tid))
+            lines.append("")
+
+        joins = _join_lines(con)
+        if joins:
+            lines.append("## How the tables connect (ready-to-use joins)")
+            lines.extend(joins)
             lines.append("")
 
         definitions = con.execute(

@@ -93,7 +93,7 @@ class TestTimeline(unittest.TestCase):
         self.assertEqual(timeline.project, "Sales")
         self.assertTrue(timeline.promoted)
         self.assertTrue(timeline.ok)
-        self.assertEqual(len(timeline.stages), 13)
+        self.assertEqual(len(timeline.stages), 14)
         self.assertEqual(len(timeline.sources), 3)
         totals = timeline.sheet_totals
         self.assertEqual(totals["reused"], 1)

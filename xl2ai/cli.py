@@ -27,6 +27,7 @@ STAGES = {
     "repair": ("xl2ai.repair", "main", "suggest opt-in, reversible repairs (null tokens, category spelling, text-as-number)"),
     "relations": ("xl2ai.relations", "main", "infer conservative relationships between tables"),
     "rules": ("xl2ai.rules", "main", "run configured deterministic business rules and KPIs"),
+    "digest": ("xl2ai.digest", "main", "pre-compute key numbers: totals, biggest groups, monthly trends"),
     "changes": ("xl2ai.changes", "main", "compare a run with the previous trusted run"),
     "pack": ("xl2ai.contextpack", "main", "build a compact deterministic context pack for AI"),
     "query": ("xl2ai.query", "main", "read-only capped schema/describe/sample/aggregate/trace/sql tools"),

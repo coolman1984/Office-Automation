@@ -23,6 +23,11 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Report-shaped sheets are described, not flattened blindly: several tables on one sheet (`query meta regions`,
   `query region <table> <n>` reads one back out under its own header) and grouped multi-row headers
   ("Plan" under "Q1") are detected and recorded.
+- Key numbers computed in advance for every data table: totals, biggest groups and monthly trends, each with the
+  SQL that produced it (`query digest <table>`); totals rows excluded, prices averaged rather than added.
+- `query find <text> [--values]`: where a name, header or value lives across every file, Arabic-spelling tolerant.
+- Cross-file SQL (`query sql "*" ...`) plus ready JOIN recipes for every detected relationship.
+- Several big workbooks are extracted in parallel with the direct engine (`[extract] workers`).
 - Formula lineage: which sheet or other workbook each computed column pulls from (`query meta lineage`), shown
   in `brief`, the context pack and the agent brief -- "this report is computed from Raw Sales".
 - Incremental refresh: unchanged trusted sources are reused without reopening Excel.
