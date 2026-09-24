@@ -21,7 +21,9 @@ def platform_modules():
 
 def global_refs(table):
     for sym in table.get_symbols():
-        if sym.is_referenced() and sym.is_global():          # closure variables are free, not global
+        # Python 3.12 inlines comprehensions into the containing scope; their
+        # iteration variables are assigned there but are not module globals.
+        if sym.is_referenced() and sym.is_global() and not sym.is_assigned():
             yield sym.get_name()
     for child in table.get_children():
         yield from global_refs(child)
