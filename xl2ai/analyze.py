@@ -22,6 +22,10 @@ TOTALS_LABELS = ("total", "totals", "grand total", "subtotal", "sub-total", "sum
                  "إجمالي", "الإجمالي", "المجموع", "مجموع", "الاجمالي", "اجمالي")
 
 
+TOTALS_PREFIXES = ("total", "subtotal", "sub-total", "grand total", "إجمالي", "الإجمالي", "اجمالي", "الاجمالي",
+                   "مجموع", "المجموع")
+
+
 def q(name):
     return '"' + str(name).replace('"', '""') + '"'
 
@@ -104,11 +108,17 @@ def _detect_totals_rows(src, table_name, text_columns, max_rows):
         return []
     tbl = q(table_name)
     found = {}
+    marks = ",".join("?" * len(TOTALS_LABELS))
+    # a bare label ("Total"), or a short label led/ended by one ("Cairo Total", "Total Q1", "إجمالي القاهرة");
+    # length-capped so a sentence that merely mentions a total is not taken for a totals row
+    affix = " OR ".join(["v LIKE ?"] * (2 * len(TOTALS_PREFIXES)))
+    affix_args = [p for w in TOTALS_PREFIXES for p in (w + " %", "% " + w)]
     for col in text_columns:
-        marks = ",".join("?" * len(TOTALS_LABELS))
         rows = src.execute(
-            f"SELECT _xl_row, {q(col)} FROM {tbl} WHERE LOWER(TRIM(CAST({q(col)} AS TEXT))) IN ({marks}) "
-            f"LIMIT ?", (*TOTALS_LABELS, max_rows)
+            f"SELECT _xl_row, raw FROM (SELECT _xl_row, {q(col)} AS raw, LOWER(TRIM(CAST({q(col)} AS TEXT))) AS v "
+            f"FROM {tbl} "
+            f"WHERE typeof({q(col)}) = 'text') WHERE v IN ({marks}) OR (length(v) <= 40 AND ({affix})) LIMIT ?",
+            (*TOTALS_LABELS, *affix_args, max_rows)
         ).fetchall()
         for xl_row, val in rows:
             found.setdefault(xl_row, str(val))
@@ -183,7 +193,7 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                         formulas, pivots, merged = (int(v or 0) for v in x)
                         if formulas:
                             _add_finding(con, "DQ_FORMULAS_VALUE_ONLY", "warn", table_id, None, formulas, [],
-                                         "formula results were extracted as values; formula logic is not yet represented in the catalog")
+                                         "formula results were extracted as values; which sheets they pull from is in query meta lineage")
                         if pivots:
                             _add_finding(con, "DQ_PIVOT_OUTPUT_ONLY", "warn", table_id, None, pivots, [],
                                          "pivot output was extracted; pivot definition/source logic is not yet represented")
@@ -202,7 +212,9 @@ def analyze_catalog(cfg, run_id, catalog_path=None):
                 cols = con.execute("""SELECT column_id,name,sql_type,kind,non_null,error_cells,original_header
                                       FROM _columns WHERE table_id=? ORDER BY position""", (table_id,)).fetchall()
                 candidate_cols = []
-                text_columns = [c[1] for c in cols if c[3] == "text"]
+                # every column that can hold text: a "Total" label typed into a numeric id column makes it mixed,
+                # and one typed into a date column sits among dates stored as text -- both were missed before
+                text_columns = [c[1] for c in cols if c[3] in ("text", "mixed", "date")]
                 generated_headers = sum(1 for c in cols if c[6] is None)
                 if cols and generated_headers / len(cols) >= 0.5:
                     _add_finding(con, "DQ_HEADER_LOW_CONFIDENCE", "warn", table_id, None, generated_headers, [],

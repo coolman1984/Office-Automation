@@ -6,7 +6,8 @@ description: The single first command a cold agent runs on an unfamiliar xl2ai p
 # agent-start
 
 You are an agent that just arrived at a project. Read `skills/platform-overview` for the rules if you have not,
-then run exactly this before anything else:
+If you are connected to the xl2ai MCP server, call its `start` tool instead and follow what it returns (see
+`CONNECTING.md`). Otherwise run exactly this before anything else:
 
 ```
 python -m xl2ai brief
@@ -32,6 +33,13 @@ Each table carries its own `readiness`:
 - **`needs_review`** — usable, but read why: `quality_errors` and `blind_spots` say what to check
   (`xl2ai query meta quality` for the findings, `xl2ai query describe <table>` for the column-level detail).
 - **`not_ready`** — stored data did not verify against Excel. Do not use it; say so rather than answering anyway.
+
+`ai/agent_brief.md` already holds each table's **key numbers** (totals, biggest groups, monthly trend) and
+**how the tables connect** (ready JOINs, across files too) -- read those before running any query of your own.
+
+Each table also carries `regions` (more than 1 = several tables in one sheet: read them with
+`xl2ai query region <table> <n>`, never aggregate the flattened wide table) and `feeds_from` (the sheets or
+workbooks its formulas pull from -- a report computed from another table is a view of it, not independent evidence).
 
 `gaps` is the complete list of reasons brief did not return exit code 0. Never proceed past a `not_ready` table or
 a `stale`/`not_promoted` gap by assuming the data is "probably fine" — the platform already checked and told you

@@ -17,6 +17,9 @@ import argparse
 import sys
 
 from .brief import build_brief
+from .anomalies import anomaly_lines
+from .digest import digest_lines
+from .reconcile import reconciliation_lines
 from .core.config import load_config
 from .core.errors import Xl2aiError
 from .core.fsutil import atomic_write_text
@@ -63,11 +66,44 @@ def _render_changes(con):
     return lines
 
 
+def _a1(row, col):
+    letters = ""
+    while col:
+        col, rem = divmod(col - 1, 26)
+        letters = chr(65 + rem) + letters
+    return f"{letters}{row}"
+
+
+def _join_lines(con, limit=15):
+    """One line per relationship: what links to what, how sure, and the JOIN to use (cross-file aware)."""
+    from .query import q, source_alias
+    rows = con.execute("""SELECT r.status, r.containment, r.score, fc.name, ft.table_name, ft.source_id,
+                                 tc.name, tt.table_name, tt.source_id
+                          FROM _relationships r
+                          JOIN _columns fc ON fc.column_id = r.from_column JOIN _tables ft ON ft.table_id = fc.table_id
+                          JOIN _columns tc ON tc.column_id = r.to_column JOIN _tables tt ON tt.table_id = tc.table_id
+                          ORDER BY r.status DESC, r.score DESC LIMIT ?""", (limit,)).fetchall()
+    lines = []
+    for status, containment, score, fcol, ftab, fsrc, tcol, ttab, tsrc in rows:
+        same = fsrc == tsrc
+        a = q(ftab) if same else f"{source_alias(fsrc)}.{q(ftab)}"
+        b = q(ttab) if same else f"{source_alias(tsrc)}.{q(ttab)}"
+        how = "xl2ai query sql " + (fsrc if same else '"*"')
+        pct = f"{containment:.0%} of values found" if containment is not None else "declared"
+        lines.append(f"- `{ftab}.{fcol}` -> `{ttab}.{tcol}` ({status}, {pct}): "
+                     f"`FROM {a} a JOIN {b} b ON a.{q(fcol)} = b.{q(tcol)}` via `{how}`")
+    return lines
+
+
 def _column_lines(con, table_id):
     has_roles = con.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_column_roles'").fetchone()[0]
     cols = con.execute("SELECT column_id,name,sql_type FROM _columns WHERE table_id=? ORDER BY position",
                        (table_id,)).fetchall()
+    groups = {}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='_header_groups'").fetchone():
+        groups = {r[0]: json.loads(r[1] or "[]") for r in con.execute(
+            "SELECT column_id,path FROM _header_groups WHERE table_id=?", (table_id,)).fetchall()}
     roles = {}
     if has_roles:
         roles = {r[0]: (r[1], r[2], r[3]) for r in con.execute(
@@ -76,12 +112,13 @@ def _column_lines(con, table_id):
     for cid, name, sql_type in cols:
         role, unit, currency = roles.get(cid, (None, None, None))
         tag = f" [{role}" + (f", {currency}" if currency else f", {unit}" if unit else "") + "]" if role else ""
-        lines.append(f"    - {name} ({sql_type}){tag}")
+        under = f" -- under {' > '.join(groups[cid])}" if groups.get(cid) else ""
+        lines.append(f"    - {name} ({sql_type}){tag}{under}")
     return lines
 
 
-def build_agent_brief(cfg, run_id, catalog_path=None):
-    brief_out, _ = build_brief(cfg, run_id)
+def build_agent_brief(cfg, run_id, catalog_path=None, in_progress=False):
+    brief_out, _ = build_brief(cfg, run_id, in_progress=in_progress)
     run_dir = os.path.join(cfg.runs_dir, run_id)
     path = catalog_path or os.path.join(run_dir, "catalog.db")
     if not os.path.isfile(path):
@@ -105,6 +142,10 @@ def build_agent_brief(cfg, run_id, catalog_path=None):
         lines.extend(_render_changes(con))
         lines.append("")
 
+        from .query import source_alias
+        name_counts = {}
+        for t in brief_out["tables"]:
+            name_counts[t["table_name"].lower()] = name_counts.get(t["table_name"].lower(), 0) + 1
         lines.append("## Tables")
         for t in brief_out["tables"]:
             tid = t["table_id"]
@@ -114,12 +155,40 @@ def build_agent_brief(cfg, run_id, catalog_path=None):
                 grain_desc = row[0] if row else None
             lines.append(f"### {t['table_name']} (`{tid}`) -- {t['sheet']} -- {t['rows']:,} rows"
                         + (f" -- kind: {t['kind']}" if t.get("kind") else ""))
+            lines.append("In SQL (query across all files): `" + (t["table_name"] if name_counts[t["table_name"].lower()] == 1
+                         else f"{source_alias(t['source_id'])}.{t['table_name']}") + "`")
             if grain_desc:
                 lines.append(f"Grain: {grain_desc}")
             if t["readiness"] != "ready":
                 lines.append(f"Readiness: **{t['readiness']}**")
+            if t.get("feeds_from"):
+                names = {x[0]: x[1] for x in con.execute("SELECT table_id, table_name FROM _tables")}
+                src = sorted({(names.get(f["table_id"]) and f"`{names[f['table_id']]}`") or
+                              ((f["workbook"] + "!") if f["workbook"] else "") + (f["sheet"] or "") +
+                              (" (not in this project)" if f["status"] != "resolved" else "")
+                              for f in t["feeds_from"]})
+                lines.append("Computed from: " + ", ".join(src) + " (formulas; see `xl2ai query meta lineage`)")
+            if t.get("regions", 0) > 1 and "_regions" in existing:
+                lines.append(f"Holds {t['regions']} separate tables -- read one at a time with "
+                             f"`xl2ai query region {tid} <n>`:")
+                for no, r0, c0, r1, c1, hdr in con.execute(
+                        "SELECT region_no, first_row, first_col, last_row, last_col, header_row FROM _regions "
+                        "WHERE table_id=? AND kind='table' ORDER BY region_no", (tid,)):
+                    lines.append(f"    - region {no}: {_a1(r0, c0)}:{_a1(r1, c1)}"
+                                 + (f", header row {hdr}" if hdr else ", no header row"))
+            lines.extend(digest_lines(con, tid))
+            lines.extend(anomaly_lines(con, tid))
+            lines.extend(reconciliation_lines(con, tid))
             lines.append("Columns:")
             lines.extend(_column_lines(con, tid))
+            lines.append("")
+
+        from .documents.links import document_lines
+        lines.extend(document_lines(con))
+        joins = _join_lines(con)
+        if joins:
+            lines.append("## How the tables connect (ready-to-use joins)")
+            lines.extend(joins)
             lines.append("")
 
         definitions = con.execute(

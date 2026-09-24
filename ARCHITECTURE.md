@@ -43,7 +43,7 @@ not in what exists: the earlier plan had a "price/volume/mix" phase. That belong
 
 | # | Risk | Impact | Planned fix |
 |---|---|---|---|
-| R1 | One wide table per sheet; multi-row headers and several tables per sheet are flattened | wrong/awkward schema for report-style sheets | region detection + multi-row headers (phase 2) |
+| R1 | One wide table per sheet; multi-row headers and several tables per sheet are flattened | wrong/awkward schema for report-style sheets | mitigated (0.11.0): regions and grouped headers are detected and recorded, `query region` reads one table back out; the stored identity is still one table per sheet |
 | R2 | Header detection is a fixed heuristic with no confidence or override | silent mis-detection | score + reasons stored in `_tables`; config override per sheet |
 | R3 | Table identity = sanitized sheet name | renamed/re-ordered sheets break change detection | stable `table_id` + rename detection by header fingerprint |
 | R4 | DB file name = file stem | `a/report.xlsx` and `b/report.xlsx` overwrite each other | run folder + `source_id` naming |
@@ -146,7 +146,13 @@ KPIs. Packs are loaded only from paths declared in project config. Results carry
 calculator plugins and automatic applies-when selectors remain optional future extensions; they are not silently
 treated as built.
 
-## 5.5. Agent access: CLI first, decided (not just deferred)
+## 5.5. Agent access: CLI first, decided (not just deferred) -- superseded in 0.13.0
+
+**0.13.0:** an MCP server now exists (`xl2ai serve`, see `CONNECTING.md`) because agent hosts that cannot, or should
+not, be taught a command line are the common case in practice. It is a thin layer over the same query/brief
+functions (so it cannot drift from the CLI), keeps its tool list to eight purpose-named tools with short schemas to
+limit the per-call context cost argued below, and returns the same capped, evidence-bearing answers. The original
+reasoning follows for the record.
 
 Section 7 has said "tools are CLI first, an MCP wrapper is optional later" since before any agent-readiness work
 existed. That default is now a decision, not a placeholder, based on: an MCP server pays a context cost on every

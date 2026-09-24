@@ -18,7 +18,8 @@ DEFAULTS = {
     "environment": {"wrapper_prefixes": []},        # file prefixes of rights-management wrappers (Excel opens them)
     "refresh": {"allow_partial": False, "keep_runs": 3, "lock_stale_hours": 12},
     "extract": {"verify": True, "strict": False, "block_cells": 500_000, "cache_cells": 12_000_000,
-                "open_timeout": 180, "visible": False, "sheets": []},
+                "open_timeout": 180, "visible": False, "sheets": [], "engine": "auto",
+                "workers": 0},
     "analysis": {"sample_values": 5, "top_k": 5, "relation_sample": 1000, "row_hash_max_rows": 200_000},
     "rules": {"packs": [], "block_on_error": False},
     "repair": {"enabled": False, "null_tokens": True, "category_consolidation": True, "text_coercion": True},
@@ -26,10 +27,12 @@ DEFAULTS = {
 }
 SOURCE_KEYS = {"path": str, "alias": str}
 MINIMUMS = {("refresh", "keep_runs"): 1, ("refresh", "lock_stale_hours"): 0, ("extract", "block_cells"): 1000,
-            ("extract", "cache_cells"): 0, ("extract", "open_timeout"): 5,
+            ("extract", "cache_cells"): 0, ("extract", "open_timeout"): 5, ("extract", "workers"): 0,
             ("analysis", "sample_values"): 1, ("analysis", "top_k"): 1, ("analysis", "relation_sample"): 10,
             ("analysis", "row_hash_max_rows"): 0, ("ai", "context_tokens"): 500, ("ai", "query_rows"): 1,
             ("ai", "query_bytes"): 256, ("ai", "query_timeout"): 1}
+
+CHOICES = {("extract", "engine"): ("auto", "excel", "direct")}
 
 
 def _err(msg, hint=""):
@@ -66,6 +69,9 @@ def _merge(raw):
                 near = difflib.get_close_matches(key, list(cfg[section]), n=1)
                 raise _err(f"unknown key '{key}' in [{section}]", f"did you mean '{near[0]}'?" if near else "")
             _check_type(f"[{section}] {key}", value, DEFAULTS[section][key])
+            choices = CHOICES.get((section, key))
+            if choices and value not in choices:
+                raise _err(f"[{section}] {key} must be one of {', '.join(choices)} (got {value!r})")
             minimum = MINIMUMS.get((section, key))
             if minimum is not None and value < minimum:
                 raise _err(f"[{section}] {key} must be >= {minimum} (got {value})")
@@ -114,7 +120,8 @@ class Config:
         e = self.extract
         return SimpleNamespace(verify=e["verify"], strict=e["strict"], block_cells=e["block_cells"],
                                cache_cells=e["cache_cells"], open_timeout=e["open_timeout"], visible=e["visible"],
-                               sheets={s.strip().lower() for s in e["sheets"]}, wrapper_prefixes=self.wrapper_prefixes)
+                               sheets={s.strip().lower() for s in e["sheets"]}, wrapper_prefixes=self.wrapper_prefixes,
+                               engine=e["engine"])
 
     def resolve(self, path):
         return path if os.path.isabs(path) else os.path.abspath(os.path.join(self.root, path))
@@ -130,7 +137,13 @@ class Config:
         Refresh/retention settings and unrelated sources deliberately do not participate, so an unchanged workbook
         can reuse its previous trusted database even when another source is added or retention policy changes.
         """
-        blob = {"environment": self.raw["environment"], "extract": self.raw["extract"]}
+        from ..extract.pipeline import resolve_engine
+        extract = dict(self.raw["extract"])
+        extract.pop("workers", None)          # how many run at once never changes what is extracted
+        engine = resolve_engine(SimpleNamespace(engine=extract.pop("engine", "auto")))
+        if engine != "excel":                 # the Excel engine keeps its pre-engine-setting fingerprint (reuse holds)
+            extract["engine"] = engine
+        blob = {"environment": self.raw["environment"], "extract": extract}
         return hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -148,6 +161,15 @@ def find_config(start=None):
 
 def load_config(path=None, required=True, start=None):
     """Load a config file (explicit path, or discovered upward from cwd). Without one, defaults + cwd root."""
+    if path and os.path.isdir(path):                  # an Excel folder or a workspace folder, not a file
+        from ..workspace import resolve_workspace
+        resolved = resolve_workspace(path)
+        if not resolved:
+            raise _err(f"{path} has no xl2ai workspace yet", f'run: python -m xl2ai open "{path}"')
+        path = resolved
+    if not path and os.environ.get("XL2AI_WORKSPACE"):
+        from ..workspace import resolve_workspace
+        path = resolve_workspace(os.environ["XL2AI_WORKSPACE"])
     path = path or find_config(start)
     if path is None:
         if required:

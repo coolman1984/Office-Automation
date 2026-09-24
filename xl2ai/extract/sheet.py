@@ -11,6 +11,7 @@ from .common import ERROR_TEXT, ERR_HI, ERR_LO, HEADER_SCAN_ROWS, XL_FORMULAS, X
 from .dates import classify_format, serial_to_iso
 from .layout import find_extent, find_header, find_merged_areas, header_confidence, show_filtered_rows
 from .names import build_columns, clean_header, col_letter, q
+from .regions import find_regions, header_groups, multiple_tables
 
 class SheetResult:
     def __init__(self, idx, name, table, visibility):
@@ -19,7 +20,64 @@ class SheetResult:
                              first_col=None, last_col=None, data_rows=0, columns=0, blank_rows_skipped=0,
                              error_cells=0, formula_cells=None, pivot_tables=None, filter_active=None,
                              merged_areas=0, merged_in_data=None, header_cells=0, preamble_cells=0, read_sec=0.0, write_sec=0.0, total_sec=0.0, plans=[], data_first=None,
-                             header_confidence=None, header_reasons=None)
+                             header_confidence=None, header_reasons=None,
+                             regions=[], regions_complete=1, header_groups={}, header_groups_method=None)
+
+
+def record_structure(res, first_blk, fr, fc, lr, hdr, merged):
+    """Separate table regions and grouped header rows, from values already read (no extra Excel calls)."""
+    regions = find_regions(first_blk, fr, fc)
+    if multiple_tables(regions):
+        res.regions = regions
+        res.regions_complete = int(len(first_blk) >= lr - fr + 1)
+    res.header_groups, res.header_groups_method = header_groups(first_blk, hdr, fr, fc, merged)
+
+
+def write_structure(con, res):
+    import json
+    for n, g in enumerate(res.regions, 1):
+        con.execute("INSERT INTO _regions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (res.table_name, n, g["first_row"], g["first_col"], g["last_row"], g["last_col"],
+                     g["header_row"], g["kind"], g["cells"], res.regions_complete))
+    by_col = {p.xl_col: p.name for p in res.plans}
+    for xl_col, path in sorted(res.header_groups.items()):
+        if xl_col in by_col:
+            con.execute("INSERT INTO _header_groups VALUES (?,?,?,?,?)",
+                        (res.table_name, xl_col, by_col[xl_col], json.dumps(path, ensure_ascii=False),
+                         res.header_groups_method))
+
+
+FORMULA_ROWS_PER_READ = 200_000
+MAX_DISTINCT_FORMULAS = 20_000
+
+
+def record_formula_refs(sess, ws, con, table, plan, data_first, last_row):
+    """Every formula of one column, read as R1C1 text in large blocks (one COM call per block, like values).
+
+    In R1C1 form a column filled down has one identical formula text on every row, so the distinct set is tiny
+    and each is parsed once. Writes `_formula_refs` (sheets/workbooks referenced, with cell counts) -- the same
+    table the direct engine fills, so lineage is complete for Excel-engine workbooks too, not a one-cell sample.
+    """
+    from ..lineage import formula_refs
+    counts, first = {}, None
+    for r0 in range(data_first, last_row + 1, FORMULA_ROWS_PER_READ):
+        r1 = min(last_row, r0 + FORMULA_ROWS_PER_READ - 1)
+        vals = sess.call(lambda: ws.Range(ws.Cells(r0, plan.xl_col), ws.Cells(r1, plan.xl_col)).FormulaR1C1)
+        rows = vals if isinstance(vals, tuple) else ((vals,),)
+        for row in rows:
+            f = row[0] if isinstance(row, tuple) else row
+            if isinstance(f, str) and f.startswith("="):
+                counts[f] = counts.get(f, 0) + 1
+                if len(counts) > MAX_DISTINCT_FORMULAS:
+                    break
+    refs = {}
+    for f, n in counts.items():
+        first = first or f
+        for key in formula_refs(f):
+            refs[key] = refs.get(key, 0) + n
+    for (book, sheet), n in refs.items():
+        con.execute("INSERT INTO _formula_refs VALUES (?,?,?,?,?,?)",
+                    (table, plan.name, book, sheet, n, (first or "")[:200]))
 
 
 def iter_data(blocks, data_first, counters):
@@ -116,6 +174,7 @@ def extract_sheet(sess, idx, con, res, opts, budget):
     # and just flag the data region (walking every merged area there is far too slow).
     merged = sess.call(lambda: find_merged_areas(ws, fr, min(lr, fr + HEADER_SCAN_ROWS), fc, lc))
     res.merged_areas = len(merged)
+    record_structure(res, first_blk, fr, fc, lr, hdr, merged)
     if data_first <= lr:
         try:                                         # False = none merged, True/Null(mixed) = some merged
             mc = sess.call(lambda: ws.Range(ws.Cells(data_first, fc), ws.Cells(lr, lc)).MergeCells)
@@ -215,10 +274,19 @@ def extract_sheet(sess, idx, con, res, opts, budget):
                 formula_cells = sess.call(lambda: col_rng.SpecialCells(XL_FORMULAS))
                 sample = sess.call(lambda: formula_cells.Cells(1, 1).FormulaR1C1)
                 con.execute("INSERT INTO _formulas VALUES (?,?,?,?)", (table, p.name, 1, str(sample)[:200]))
+            except ExcelDied:
+                raise
             except Exception:
                 continue
+            try:
+                record_formula_refs(sess, ws, con, table, p, data_first, lr)
+            except ExcelDied:
+                raise
+            except Exception as e:                  # lineage is a bonus; the sample above already stands
+                log("WARN", f"  formula references of '{p.name}' not read: {e}")
     for area, val in merged:
         con.execute("INSERT INTO _merged_areas VALUES (?,?,?)", (res.sheet_name, area, val))
+    write_structure(con, res)
     res.status = "extracted"
     if not total_rows:
         res.message = "header only (no data rows)"

@@ -1,5 +1,194 @@
 # CHANGELOG
 
+## 0.14.0 - Documents: Word, PowerPoint, PDF and e-mail become data (2026-09-24)
+
+The platform's scope widens from "Excel for agents" to "the data locked in office files, for agents". A workspace now
+takes every supported file in the folder (and its sub-folders).
+
+* **Readers** (`xl2ai/documents/readers.py`, one common `Doc` shape: located text blocks, tables, metadata,
+  attachments, stated warnings): Word .docx (headings -> section paths, lists, tables with their captions), PowerPoint
+  .pptx (slide titles, text, speaker notes, tables, and the numbers stored behind charts), PDF (text per page with
+  tables cut out and extracted as tables; scanned pages without a text layer are reported, not silently empty),
+  e-mail .eml (headers, plain or HTML body, attachments) and Outlook .msg (read straight from the OLE container --
+  subject, sender, recipients, sent time, body, attachments -- no Outlook and no fragile third-party parser;
+  rights-protected messages are detected and reported), plus Markdown (headings, pipe tables), CSV, HTML and text.
+  Arabic-Windows (cp1256) text is decoded.
+* **Office readers** (`com_readers.py`) for rights-managed and legacy files on Windows: Word (paragraph outline
+  levels, tables via cells so merged cells work), PowerPoint (titles, text, tables, notes) and Outlook
+  (`OpenSharedItem`, attachments saved and read). COM initialised per thread. Tested with fake object models here;
+  needs a first run on Windows to validate.
+* **Documents as databases** (`documents/store.py`): every table in a document -- including tables of Word files and
+  sheets of Excel files attached to e-mails, recursively -- becomes a typed data table ("1,234.50", "(300)", "12%",
+  Arabic-Indic digits parsed) with the same contract as a sheet, so the catalog, key numbers, relationships, anomalies,
+  report checks and cross-file SQL all work on document tables unchanged. Text goes to `_doc_blocks` with its
+  location; `_doc_entities` holds codes, money with currency, dates (numeric, English and Arabic month names),
+  percentages, e-mails and phones with character spans.
+* **Catalog**: `_documents`, `_blocks` with a full-text index (FTS5; Arabic letter variants, diacritics and the
+  و/ف/ب/ك/ل/ال prefixes folded so "والقاهرة" is found by "القاهره"), `_entities`, `_table_origin`.
+* **Links** (new `links` stage, `_mentions`): every code, e-mail or phone in a document is looked up in the tables --
+  "the e-mail mentions INV-005000 -> row 5003 of Transactions.invoice_no". Listed per document in the agent brief.
+* **Agent tools**: `search` (ranked full-text with location and snippet), `read` (a document, attachment, page,
+  section, or the blocks around a hit), and `save_records`: records an agent extracts from free text are stored in
+  `<data>/extracted.db` only when every field carries a block id and an exact quote, the quote is found in that block
+  and the value in the quote (numbers and dates matched however they are written); everything else is rejected with
+  the reason. Saved tables join with everything else in `query`. CLI: `xl2ai docs search|read`.
+* Cross-file SQL hints now name each cleaned table's raw form exactly (`all rows: <alias>.<table>`).
+* Verified with a real Claude Code session on a mixed folder (Excel, Word, PowerPoint, PDF, two e-mails with Word and
+  Excel attachments): it summarised every file, turned the order e-mail into a proven record and matched it to the
+  sales row, compared the contract with the customer's real purchases, and checked the chart numbers in the deck
+  against the data -- all correct, without opening a single file itself.
+* New optional extras: `pip install -e ".[all]"` (Excel direct engine + document readers).
+
+## 0.13.2 - Fixes found by a real agent session; Excel engine safe under the agent connection (2026-09-23)
+
+A real Claude Code session (MCP tools only, file tools blocked) was run on a realistic folder: 18k-row sales
+workbook with a pasted grand-total row and an entry error, customers and products workbooks, and a management
+report with one wrong branch figure. It answered everything correctly, but only by working around the tool. Fixed:
+
+* **Excel engine under `prepare`**: COM is now initialised per calling thread (`process_file_excel`). `prepare`
+  runs the refresh in a background thread, where COM refuses every call from a thread that did not initialise it --
+  every agent-started build of a DRM/Excel-engine folder would have failed on Windows.
+* **Grand-total rows missed**: a "Total" label typed into a *date* column was not checked, so the key-number total
+  of the sales table came out doubled. Totals detection now covers date columns, and the digest adds a safety net: a
+  row whose amount equals the sum of every other row, with at least half its cells empty, is flagged whatever its
+  label says.
+* **Report check missed a wrong figure**: a report sheet holding two stacked tables was compared as one, diluting
+  label matches. Reconciliation now checks one region at a time; the wrong branch is found automatically.
+* **Plain table names are clean**: in cross-file SQL (`query sql "*"`, MCP `query`) a plain table name leaves out
+  rows flagged as totals, so an agent's own SUM cannot double-count; `<alias>.<table>` still reads every row.
+* **Name guessing**: the agent brief states each table's SQL name, and a "no such table" error lists the usable
+  names (the agent had tried source ids as table names five times).
+* **Formula lineage on the Excel engine** now reads every formula of a formula column (R1C1 text, one COM call per
+  200k rows, distinct formulas parsed once) instead of one sample; an Excel crash during that probe is no longer
+  swallowed. The direct engine reports files that are neither zip nor OLE as rights-managed, with the reason.
+
+Measured on the same questions before/after: 29 -> 21 agent turns, cost 0.40 -> 0.21 USD, 92 -> 65 s, no failed
+tool calls from wrong table names.
+
+## 0.13.1 - One-command connection to Claude Code, Codex CLI and Claude Desktop (2026-09-23)
+
+* `xl2ai connect --install all|claude-code|codex|claude-desktop [--workspace] [--dry-run]` (`xl2ai/connectors.py`):
+  Claude Code via its own `claude mcp add --scope user`; Codex CLI by adding/replacing only the
+  `[mcp_servers.xl2ai]` section of `~/.codex/config.toml` (with a 120 s tool timeout for `prepare`); Claude Desktop
+  by merging into `claude_desktop_config.json`. Existing settings are preserved and backed up once to `.bak`.
+  Verified against a real Claude Code install: `claude mcp list` reports the server as connected.
+* The server now defaults to the folder the host started it in when that folder is a workspace or holds Excel
+  files, so an agent opened in an Excel folder needs no path at all. An explicit `workspace` always wins.
+* The printed settings use the installed program when xl2ai is packaged as a standalone executable.
+
+## 0.13.0 - The agent connection, workspaces, report checks and anomalies (2026-09-23)
+
+The theme: make "where does everything live and how does an agent talk to it" simple and explicit
+(`CONNECTING.md`), and answer two more questions before the agent asks them.
+
+* **Workspaces** (`xl2ai open <excel folder>`, `xl2ai/workspace.py`): the Excel folder *is* the project. `open`
+  creates a hidden `.xl2ai/` beside the files (config covering every workbook in the folder and its sub-folders,
+  an `AGENTS.md` for file-reading agents, and `data/`), or under `~/.xl2ai/workspaces/` with a registry when the
+  folder is read-only. Every `--config` now also accepts a folder, and `XL2AI_WORKSPACE` can name one. Each promoted
+  run's AI files are copied to `data/latest/` (one stable path). Excel lock files (`~$`), non-workbook files and the
+  workspace itself are never sources.
+* **MCP server** (`xl2ai serve`, `xl2ai/mcp_server.py`, no third-party dependency): JSON-RPC 2.0 over stdio,
+  protocol versions 2025-06-18 / 2025-03-26 / 2024-11-05. Server `instructions` state the workflow; eight tools
+  (`start`, `prepare`, `find`, `table`, `query`, `facts`, `region`, `trace`) with read-only annotations (only
+  `prepare` writes); resources (`xl2ai://brief`, `xl2ai://context-pack`, `xl2ai://instructions`); a prompt
+  (`analyze_excel_folder`). `prepare` runs the refresh in a background thread and reports progress from the
+  pipeline's event bus, so long builds never block or time out a tool call. stdout carries protocol only (stray
+  output is redirected to stderr). Tool errors are results with a code and hint, never crashes.
+  `xl2ai connect [--workspace] [--write]` prints the Claude Code / Claude Desktop / generic MCP settings.
+  This supersedes the "CLI first, MCP only if needed" decision in `ARCHITECTURE.md` §5.5: both exist, over the
+  same functions.
+* **Cross-file SQL without aliases**: `query sql "*"` (and the MCP `query` tool) exposes every table by its plain
+  name when that name is unique across workbooks; a name present in several workbooks fails with a message naming
+  the qualified choices, instead of SQLite silently picking one.
+* **Report reconciliation** (`reconcile` stage, `_reconciliation`): small report tables are matched against raw data
+  tables -- report row labels vs a raw category column, report numbers vs SUM/COUNT of each raw amount by that
+  category, a "Total" row vs the grand total. Explained columns are listed; disagreeing rows become a
+  `report_disagrees_with_data` gap in `brief` with both numbers. Values only, so it also works for pasted-value and
+  DRM reports.
+* **Anomalies** (`anomalies` stage, `_anomalies`): extreme outliers (3xIQR fences) with examples by Excel row, rare
+  negatives in positive measures, months far from the usual level (robust z on the monthly key numbers), months
+  with no rows inside the covered range, and dates before 1990 or over a year ahead. Shown in the agent brief,
+  context pack, `brief` flags and `query meta anomalies`.
+* `query trace` now names the file, sheet and row (and says clearly when a row is not stored). `query` sub-commands
+  accept `--config`/`--run` after the command too.
+
+## 0.12.0 - Key numbers, find, cross-file joins, parallel extraction (2026-09-23)
+
+The theme: the questions every agent asks first on unfamiliar data -- "what are the big numbers", "where is X",
+"how do I combine these two files" -- are answered before it arrives, and extraction of many large files is faster.
+
+* **Key numbers** (new `digest` stage and `xl2ai digest`, catalog `_digest` / `_digest_tables`): for every plain
+  data table, totals/average/range of its amount columns, the ten biggest groups of each category column (with
+  share of total, plus an "other" remainder), and the month-by-month trend of its main date column -- each number
+  stored with the exact SQL that produced it, so it can be re-run with `query sql`. Honesty rules: flagged totals
+  rows are excluded (and counted); per-unit values (price, rate, average...) are averaged, never added up; ids and
+  codes are never measures; reports, dashboards and multi-table sheets are skipped with the reason. Shown in
+  `ai/agent_brief.md` ("Key numbers"), the context pack, `query digest <table> [--section]` and `query meta digest`.
+* **`xl2ai query find <text> [--values]`**: where a concept lives, in one call -- table/sheet names, column
+  names/headers, group headers, definitions and profiled values; `--values` also searches every text cell of every
+  source within a time budget and says how much it covered. Case-insensitive and forgiving of Arabic spelling
+  variants (أ/إ/آ/ا, ة/ه, ى/ي, diacritics, tatweel).
+* **Cross-file SQL**: `xl2ai query sql "*" "<SELECT>"` attaches every source database read-only (as
+  `<source alias>.<table>`) so tables from different workbooks join in one statement; the same authorizer, query-only
+  mode and caps apply. `ai/agent_brief.md` gained "How the tables connect": each relationship with its confidence
+  and a ready JOIN clause (cross-file aware).
+* **Parallel extraction** (direct engine): several changed workbooks are extracted at once in separate processes
+  (`[extract] workers`, 0 = auto, up to 4). The Excel engine stays one-at-a-time (one private Excel). Measured: three
+  57 MB workbooks (3M rows) in 39 s. `workers` does not affect the reuse fingerprint.
+* **Totals rows**: detection now also looks in mixed-type columns (a "Total" typed into a numeric id column is
+  exactly what makes it mixed -- previously missed) and accepts short labelled forms ("Cairo Total", "Total Q1",
+  "إجمالي القاهرة"), length-capped so sentences mentioning a total are not flagged.
+* **Column roles**: a repeating number named like an id (`customer_id` in an orders table) is now `code`, not
+  `quantity`, so it is never summed.
+* **Fix**: `ai/agent_brief.md` written by `refresh` always reported "stale" and "not promoted" gaps, because it was
+  judged against the previous run while its own run was still being built. The refresh stage now marks the brief as
+  in-progress and skips those two self-referential checks (a run is only promoted if every stage passes).
+
+## 0.11.0 - A second extraction engine, report-shaped sheets, formula lineage (2026-09-22)
+
+**No output change for existing Excel-engine projects except three new, additive extract tables** (`_regions`,
+`_header_groups`, `_formula_refs`, empty unless something is found) and their catalog counterparts plus
+`_lineage`. `[extract] engine` defaults to `auto`, which on a Windows+Excel machine is the Excel engine exactly
+as before, and its reuse fingerprint is unchanged, so unchanged workbooks are still reused, not re-extracted.
+`tests/golden/fingerprints.json` needs regenerating on Windows (`python tests/regen_golden.py`) because the extract
+schema gained tables -- still outstanding, like the two earlier schema additions.
+
+* **Direct engine** (`xl2ai/extract/direct.py`, `[extract] engine = "direct"`, `xl2ai extract --engine direct`):
+  reads .xlsx/.xlsm/.xlsb/.xls without Excel via python-calamine (optional extra: `pip install -e ".[direct]"`),
+  on any OS. It reuses the Excel engine's header detection, column typing, value conversion, preamble, naming and
+  structure code -- only the cell reading differs -- and writes the same database contract.
+  - Verification: for .xlsx/.xlsm every column's count and numeric sum, and the whole-sheet cell total, are checked
+    against a second, independent reader (a streaming byte-level scan of the sheet XML). For .xlsb/.xls the
+    per-column counts come from the reader's own grid and `_verification.note` says so; there is no whole-sheet
+    check there rather than a fake one.
+  - The same XML scan restores Excel error cells (NULL + `_cell_errors`, as the Excel engine does -- the reader
+    alone would show them as empty), captures every formula per column (`_formulas` + all referenced sheets in
+    `_formula_refs`), and detects Power Query, the Data Model, external links (resolved to file names), pivots and
+    charts from the package parts. On .xlsb/.xls a `reader_limit` blind spot states what could not be seen.
+  - DRM-wrapped files are refused with a clear reason (only Excel's rights agent can open them); nothing is written.
+  - Measured on a 57 MB .xlsx (1,000,000 rows x 10 columns): ~55 s end to end with all 17 checks passing, ~1.2 GB
+    peak with the default `cache_cells`; ~67 s with `cache_cells = 0` (streams twice instead of caching).
+  - `auto` = Excel engine when this machine can drive Excel, otherwise direct. `xl2ai doctor` reports which engine
+    is in use and whether python-calamine is installed.
+* **Several tables on one sheet** (`xl2ai/extract/regions.py`, both engines, no extra Excel calls): blocks
+  separated by >= 2 blank rows that start with a header-like row, or by an empty column whose two sides do not
+  share the same rows, are recorded in `_regions`. The sheet keeps its identity (still one stored table), is
+  marked `needs_review` with a `several_tables_in_sheet` gap in `brief`, and `xl2ai query region <table> <n>`
+  returns one region's rows named by that region's own header row.
+* **Grouped (multi-row) headers**: up to three label rows directly above the header, bounded by merged areas or
+  by label runs (a lone unmerged title is never spread over the header), recorded per column in `_header_groups`
+  ("Plan" under "Q1"), shown in `ai/agent_brief.md` and `query meta header_groups`. Column names are not rewritten.
+* **Formula lineage** (`xl2ai/lineage.py`, catalog stage): formula text is parsed for `Sheet!`, `'My Sheet'!`,
+  `[Book.xlsx]Sheet!`, path-qualified and `[n]`-indexed references; each is resolved to a table in this project
+  (same workbook, or another source matched by file name) or marked `external`/`unresolved`. Own-sheet references
+  are arithmetic, not lineage, and are skipped. Surfaced in `brief` (`feeds_from`, and a
+  `depends_on_unextracted` gap when a source is outside the project), the context pack ("Computed from") and the
+  agent brief. Always `inferred`; the Excel engine contributes one sample formula per column, the direct engine
+  every formula.
+* `query meta` gained `regions`, `header_groups`, `lineage` (older runs answer with an empty result and a hint to
+  refresh, never an error). `DQ_FORMULAS_VALUE_ONLY` now points at `query meta lineage`.
+* `[extract] engine` is validated (`auto|excel|direct`); a typo is a config error like every other key.
+
 ## 0.10.0 - Agent readiness, phase 6: the agent interface and staying fresh (2026-09-22)
 
 * Added `ai/agent_brief.md` (new `agent_brief` stage, `xl2ai agent-brief` standalone command): one plain-language

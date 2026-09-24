@@ -279,3 +279,21 @@ still outstanding as of this note.
 **Recommended next step** for whoever has that environment: pick up region detection/multi-row headers using the
 synthetic-fixture approach in `tests/make_fixtures.py` (already the project's pattern for exactly this kind of
 COM-dependent, must-validate-for-real feature), then regenerate the goldens in the same pass.
+
+## 9. Status after 0.11.0
+
+The three structural items phase 3 left open are now handled **as description, not re-cutting** -- the approach
+section 8 argued for: region detection (several tables per sheet) and grouped/multi-row header reconstruction are
+pure functions over values extraction already reads, recorded next to the table (`_regions`, `_header_groups`),
+surfaced in `brief`/agent brief/context pack, and readable per region via `query region`. The table identity model
+(one per sheet) is untouched, so nothing already built or cached changes meaning. Transposed tables remain undetected.
+
+The validation blocker in section 8 ("this environment cannot run Excel") is removed for everything except DRM files
+and COM-specific behaviour: the new direct engine reads real .xlsx/.xlsb/.xls files on any OS, so these detectors are
+now tested end to end against real workbooks (`tests/test_direct_engine.py`), not only synthetic grids.
+
+Formula lineage (row 8 of the journey table, "how do tables relate", at the level of *computed from*) is new:
+`_lineage` in the catalog, resolved across sheets and across source workbooks.
+
+Still outstanding: regenerating `tests/golden/fingerprints.json` on Windows+Excel, and validating the region/header
+heuristics against the real DRM-wrapped specimen through the Excel engine.

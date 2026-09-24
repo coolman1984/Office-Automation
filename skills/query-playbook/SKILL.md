@@ -14,6 +14,9 @@ filter/group-by instead of assuming you saw everything.
 | You need to know | Run | Notes |
 |---|---|---|
 | "What's here at all?" | `xl2ai brief` | always first; see `skills/agent-start` |
+| "Where does X live?" (a name, a column, a customer, a product) | `xl2ai query find "<text>" [--values]` | one call across every file; `--values` searches every text cell too (time-bounded, the hint says how much was covered) |
+| "What are the big numbers of this table?" | `xl2ai query digest <table>` | totals, biggest groups, monthly trend -- pre-computed, each with its SQL; read these before writing any GROUP BY yourself |
+| "Combine two tables from different files" | `xl2ai query sql "*" "SELECT ... FROM <alias>.<table> JOIN <alias>.<table> ..."` | the JOIN to use is listed under "How the tables connect" in `ai/agent_brief.md` |
 | "What tables/columns exist?" | `xl2ai query schema` | lists every table with its columns; no row data |
 | "Tell me about this one table" | `xl2ai query describe <table>` | types, nulls, distinct, min/max, top-k, samples, quality/key counts |
 | "Show me some real rows" | `xl2ai query sample <table> [--limit N]` | capped; never the whole table |
@@ -25,6 +28,9 @@ filter/group-by instead of assuming you saw everything.
 | "What quality problems exist?" | `xl2ai query meta quality` | `DQ_*` codes with severity, subject, message |
 | "Which keys are trustworthy?" | `xl2ai query meta keys` | `status=confirmed` (human-declared) vs `inferred` (score attached) |
 | "What couldn't the platform read?" | `xl2ai query meta unsupported` | Power Query, Data Model, external links, stale-calculation, unread charts -- also summarized in `brief`'s `gaps` |
+| "Does this sheet hold several tables?" | `xl2ai query meta regions`, then `xl2ai query region <table> <n>` | a sheet with several tables is stored as one wide table; read each region under its own header instead of aggregating the wide table |
+| "Which columns sit under a group header (Q1 / Q2 ...)?" | `xl2ai query meta header_groups` | the group path per column, outermost first; column names themselves are unchanged |
+| "Where does this report's number come from?" | `xl2ai query meta lineage` | the sheet/workbook each computed column pulls from; `external`/`unresolved` = outside this project, say so rather than guessing the source |
 | "Is this sheet actually a data table?" | `xl2ai query meta table_kind` | `data\|notes\|report\|dashboard\|empty`, always `inferred` with reasons -- a `report`/`dashboard` sheet may not aggregate the way a plain data table would |
 | "Are there totals rows mixed into the data?" | `xl2ai query meta row_flags` | `_xl_row`-level flags (`totals_candidate`); exclude these rows explicitly before summing a column |
 | "What does this column actually mean?" | `xl2ai query meta column_roles` | `identifier\|date\|money\|quantity\|percentage\|category\|code\|boolean\|free_text\|geo\|contact`, with unit/currency where detected -- always `inferred`, never treat as a confirmed definition |

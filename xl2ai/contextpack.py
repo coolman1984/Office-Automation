@@ -99,6 +99,29 @@ def _render_markdown(p):
         lines += ["", "## Data-quality warnings"]
         for d in p["quality"]:
             lines.append(f"- {d['severity']} {d['code']} | {d['subject']} | {d['message']}")
+    if p.get("digest"):
+        lines += ["", "## Key numbers (pre-computed; totals rows excluded)"]
+        for x in p["digest"]:
+            tot = "; ".join(f"{m} {k} {v:,}" for m, d in x["totals"].items() for k, v in d.items())
+            top = "; ".join(f"{dim}: " + ", ".join(f"{k} {s:.0%}" if s is not None else str(k) for k, s in g)
+                            for dim, g in x["top"].items())
+            lines.append(f"- {x['table']} | {x['rows']:,} rows" + (f" | {tot}" if tot else "") + (f" | {top}" if top else ""))
+    if p.get("reconciliation"):
+        lines += ["", "## Reports checked against raw data"]
+        for x in p["reconciliation"]:
+            lines.append(f"- {x['report']}.{x['column']} = {x['explained_by']} | rows agreeing {x['agree']}")
+    if p.get("anomalies"):
+        lines += ["", "## Looks unusual"]
+        for x in p["anomalies"]:
+            lines.append(f"- {x['severity']} {x['table']}.{x['column']} {x['kind']} ({x['count']})")
+    if p.get("lineage"):
+        lines += ["", "## Computed from (formula lineage)"]
+        for x in p["lineage"]:
+            lines.append(f"- {x['table']} <- {x['from']}" + ("" if x["status"] == "resolved" else f" ({x['status']})"))
+    if p.get("regions"):
+        lines += ["", "## Sheets holding several tables (read with query region)"]
+        for x in p["regions"]:
+            lines.append(f"- {x['table']}: {x['tables_in_sheet']} tables")
     if p.get("blind_spots"):
         lines += ["", "## Blind spots (could not be fully read)"]
         for b in p["blind_spots"]:
@@ -212,6 +235,50 @@ def build_context_pack(cfg, run_id, catalog_path=None):
                           {"code": code, "severity": severity, "subject": subject, "message": message},
                           budget_tokens, omitted, "quality", state)
 
+        present = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "_lineage" in present:
+            for tid, book, ref_sheet, target, status in con.execute(
+                    """SELECT DISTINCT table_id, ref_workbook, ref_sheet, target_table_id, status FROM _lineage
+                       ORDER BY table_id, ref_workbook, ref_sheet"""):
+                _add_budgeted(payload, "lineage",
+                              {"table": handles.get(tid, tid),
+                               "from": handles.get(target) or ((book + "!") if book else "") + (ref_sheet or ""),
+                               "status": status},
+                              budget_tokens, omitted, "lineage", state)
+        if "_digest" in present:
+            for tid, in con.execute("SELECT table_id FROM _digest_tables WHERE status='computed' ORDER BY table_id"):
+                item = {"table": handles.get(tid, tid), "rows": None, "totals": {}, "top": {}}
+                for measure, key, value in con.execute(
+                        "SELECT measure, key, value FROM _digest WHERE table_id=? AND section='total'", (tid,)):
+                    if measure == "*":
+                        item["rows"] = int(value)
+                    elif key in ("sum", "avg") and value is not None and (key == "sum" or measure not in item["totals"]):
+                        item["totals"][measure] = {"sum" if key == "sum" else "avg": round(value, 2)}
+                for dim, k, share in con.execute(
+                        """SELECT dim, key, share FROM _digest WHERE table_id=? AND section='by_group' AND rank<=3
+                           ORDER BY dim, rank""", (tid,)):
+                    item["top"].setdefault(dim, []).append([k, None if share is None else round(share, 3)])
+                _add_budgeted(payload, "digest", item, budget_tokens, omitted, "digest", state)
+        if "_reconciliation" in present:
+            for tid, col, src, m, agg, compared, matched, status in con.execute(
+                    """SELECT report_table_id, report_column, source_table_id, source_column, agg, compared, matched,
+                              status FROM _reconciliation ORDER BY status DESC, report_table_id"""):
+                _add_budgeted(payload, "reconciliation",
+                              {"report": handles.get(tid, tid), "column": col,
+                               "explained_by": f"{agg}({handles.get(src, src)}.{m})", "agree": f"{matched}/{compared}"},
+                              budget_tokens, omitted, "reconciliation", state)
+        if "_anomalies" in present:
+            for tid, col, kind, sev, cnt in con.execute(
+                    """SELECT table_id, column_name, kind, severity, count FROM _anomalies
+                       ORDER BY CASE severity WHEN 'warn' THEN 0 ELSE 1 END, table_id, kind"""):
+                _add_budgeted(payload, "anomalies", {"table": handles.get(tid, tid), "column": col, "kind": kind,
+                                                     "severity": sev, "count": cnt},
+                              budget_tokens, omitted, "anomalies", state)
+        if "_regions" in present:
+            for tid, n in con.execute("""SELECT table_id, COUNT(*) FROM _regions WHERE kind='table'
+                                         GROUP BY table_id HAVING COUNT(*) > 1 ORDER BY table_id"""):
+                _add_budgeted(payload, "regions", {"table": handles.get(tid, tid), "tables_in_sheet": int(n)},
+                              budget_tokens, omitted, "regions", state)
         has_unsupported = con.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_unsupported'").fetchone()[0]
         if has_unsupported:
@@ -226,7 +293,9 @@ def build_context_pack(cfg, run_id, catalog_path=None):
         use = {"sources":"query schema","tables":"query schema","tables_without_columns":"query describe",
                "columns":"query describe","relationships":"query meta relationships",
                "definitions":"query meta definitions","kpis":"query meta kpis","rules":"query meta rules",
-               "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief"}
+               "changes":"query compare","quality":"query meta quality","blind_spots":"xl2ai brief",
+               "lineage":"query meta lineage","regions":"query meta regions","digest":"query digest",
+               "reconciliation":"query meta reconciliation","anomalies":"query meta anomalies"}
         payload["omitted"] = [{"what": k, "count": v, "use_tool": use.get(k, "query schema")}
                               for k,v in sorted(omitted.items()) if v]
         base = dict(payload)

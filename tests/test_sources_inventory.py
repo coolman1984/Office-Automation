@@ -41,7 +41,8 @@ class TestSourceId(unittest.TestCase):
 
     def test_kind_of(self):
         self.assertEqual(kind_of("a.XLSX"), "xlsx")
-        self.assertEqual(kind_of("a.csv"), "other")
+        self.assertEqual(kind_of("a.csv"), "csv")                 # documents and text are sources too now
+        self.assertEqual(kind_of("a.zip"), "other")
 
 
 class TestBuildInventory(unittest.TestCase):

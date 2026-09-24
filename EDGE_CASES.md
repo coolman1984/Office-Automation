@@ -11,7 +11,7 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | DRM-wrapped workbook (opened only through Excel's DRM agent) | covered (all integration tests + specimen) |
 | .xlsx / .xlsb | covered (synthetic xlsx, specimen xlsb) |
 | .xlsm (macros must not run) | planned P1 (AutomationSecurity is forced off; needs a fixture with an auto-open macro) |
-| legacy .xls, .xlt*, .xla | planned P1 |
+| legacy .xls, .xlt*, .xla | planned P1 (Excel engine); the direct engine reads .xls/.xlsb values but not their formulas/errors, and says so as a `reader_limit` blind spot |
 | password-protected file: fail fast with clear message, no leak | covered [test_password_protected_file_fails_cleanly] |
 | corrupt / not-Excel file, previous DB kept | covered [test_corrupt_file_fails_cleanly, test_failed_run_keeps_previous_database] |
 | file locked / open by another user | planned P1 |
@@ -54,8 +54,8 @@ Fixtures: synthetic ones are built by real Excel in `tests/make_fixtures.py`; "s
 | header on row 1 / below title rows / preamble kept | covered [test_preamble_blank_rows_and_totals] |
 | no header (numeric-only data) | covered [test_headerless_sheet] + specimen |
 | duplicate, blank, whitespace, numeric, error-valued headers | covered [test_duplicate_and_blank_headers, TestNaming] |
-| two-level (grouped) headers, e.g. group label above each column pair | planned P2 (today the upper level is kept in the preamble, nothing lost; header confidence explicitly flags repeated labels as a possible grouped header) |
-| several tables on one sheet (side by side / stacked) | planned P2 -- changes the extraction identity model itself (today: one table per sheet) and needs validation against real messy workbooks on Windows+Excel, not just a heuristic; not attempted this phase for that reason |
+| two-level (grouped) headers, e.g. group label above each column pair | covered [test_structure_lineage.py:TestHeaderGroups, test_direct_engine.py]: up to 3 group levels from merged areas or label runs, recorded per column in `_header_groups` (the upper rows also stay in the preamble); column names are not rewritten |
+| several tables on one sheet (side by side / stacked) | covered as *description* [test_structure_lineage.py:TestFindRegions, test_direct_engine.py]: regions recorded in `_regions`, the table is marked `needs_review`, and `xl2ai query region <table> <n>` reads one region back out under its own header. The stored table keeps its identity (one per sheet) -- re-cutting the extraction itself remains deliberately not done |
 | blank rows inside data, totals / subtotal rows, trailing notes | covered [test_structural_truth.py]: label-based totals/subtotal row detection (`_row_flags`, `DQ_TOTALS_ROW_IN_DATA`); value-sum-matching detection remains planned P4 (higher false-positive risk) |
 | header detection confidence + config override | covered (score + reasons) [test_structural_truth.py:TestHeaderConfidence]; config override remains planned |
 | transposed tables (fields in rows) | planned P2 -- same reasoning as multi-table sheets: a wrong reconstruction is worse than an honest "not detected" |

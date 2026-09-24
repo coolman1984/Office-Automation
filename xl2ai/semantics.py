@@ -91,6 +91,10 @@ def classify_column_role(name, sql_type, kind, n, nulls, distinct, sample):
         return "identifier", 0.9, "heuristic", [f"{uniq:.0%} unique", "name suggests an identifier"]
 
     if sql_type in ("INTEGER", "REAL"):
+        if _any_word(low, IDENTIFIER_WORDS):
+            # a repeating number named like an id ("customer_id" in an orders table) is a reference to something,
+            # never an amount -- summing it would be meaningless
+            return "code", 0.6, "heuristic", ["numeric column whose name suggests a code/reference, not an amount"]
         if _any_word(low, MONEY_WORDS):
             return "money", 0.75, "heuristic", ["numeric column whose name suggests a monetary value"]
         if _any_word(low, PERCENT_WORDS):

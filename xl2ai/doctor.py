@@ -22,7 +22,7 @@ def run_doctor(cfg):
     checks=[]
     is_windows=os.name=="nt"
     checks.append(_check("platform",is_windows,
-                         platform.platform() if is_windows else "not Windows; extraction unavailable, metadata/query stages still work",
+                         platform.platform() if is_windows else "not Windows; the Excel engine is unavailable (the direct engine and every other stage still work)",
                          "ok" if is_windows else "warn"))
     try:
         from .extract.common import PYWIN32_AVAILABLE
@@ -31,6 +31,14 @@ def run_doctor(cfg):
     checks.append(_check("pywin32",bool(PYWIN32_AVAILABLE),
                          "available" if PYWIN32_AVAILABLE else "missing; install pywin32 on the Windows extraction machine",
                          "ok" if PYWIN32_AVAILABLE else ("error" if is_windows else "warn")))
+    from .extract.direct import available as direct_available
+    from .extract.pipeline import resolve_engine
+    engine=resolve_engine(cfg.extract_options())
+    checks.append(_check("direct_engine",direct_available(),
+                         "python-calamine available: workbooks can be read without Excel" if direct_available()
+                         else "python-calamine missing; pip install python-calamine to read workbooks without Excel",
+                         "ok" if direct_available() else ("error" if engine=="direct" else "warn")))
+    checks.append(_check("engine",True,f"extraction engine in use: {engine} (configured: {cfg.extract['engine']})"))
     try:
         sources,warnings=build_inventory(cfg)
         checks.append(_check("sources",True,f"{len(sources)} source(s) found"+(f"; {len(warnings)} warning(s)" if warnings else "")))
