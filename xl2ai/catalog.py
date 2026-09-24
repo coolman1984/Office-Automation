@@ -139,6 +139,26 @@ CREATE TABLE IF NOT EXISTS _reconciliation (
   source_table_id TEXT, source_column TEXT, dim_column TEXT, agg TEXT, compared INTEGER, matched INTEGER,
   status TEXT, mismatches TEXT, sql TEXT
 );
+CREATE TABLE _documents (
+  source_id TEXT PRIMARY KEY, kind TEXT, title TEXT, author TEXT, created TEXT, modified TEXT, sent TEXT,
+  sender TEXT, recipients TEXT, subject TEXT, pages INTEGER, blocks INTEGER, tables INTEGER, attachments INTEGER
+);
+CREATE TABLE _blocks (
+  block_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, part TEXT, kind TEXT, page INTEGER, section TEXT,
+  level INTEGER, ord INTEGER, text TEXT
+);
+CREATE INDEX idx_blocks_source ON _blocks(source_id, ord);
+CREATE TABLE _entities (
+  source_id TEXT, block_id TEXT, kind TEXT, value TEXT, normalized TEXT, start INTEGER, "end" INTEGER
+);
+CREATE INDEX idx_entities_norm ON _entities(kind, normalized);
+CREATE TABLE _table_origin (
+  table_id TEXT PRIMARY KEY, part TEXT, page INTEGER, section TEXT, caption TEXT
+);
+CREATE TABLE _mentions (
+  normalized TEXT, kind TEXT, source_id TEXT, block_id TEXT, table_id TEXT, column_name TEXT, rows INTEGER,
+  first_row INTEGER
+);
 CREATE INDEX idx_columns_table ON _columns(table_id);
 CREATE INDEX idx_unsupported_table ON _unsupported(table_id);
 CREATE INDEX idx_tables_source ON _tables(source_id);
@@ -172,6 +192,45 @@ def _column_id(table_id, sql_name):
     return f"{table_id}/col-{digest}"
 
 
+def _ingest_document(con, src, sid, src_tables, sheet_to_table):
+    """Text blocks, entities and metadata of a document source -> catalog (+ full-text index)."""
+    from .documents.tools import index_text
+    meta = {}
+    for k, v, part in src.execute("SELECT key, value, part FROM _doc_meta"):
+        if not part:
+            meta[k] = v
+    kind = dict(src.execute("SELECT key, value FROM _meta")).get("document_kind")
+    pages = dict(src.execute("SELECT key, value FROM _meta")).get("pages")
+    n_blocks = src.execute("SELECT COUNT(*) FROM _doc_blocks").fetchone()[0]
+    n_att = src.execute("SELECT COUNT(*) FROM _doc_attachments").fetchone()[0] if "_doc_attachments" in src_tables else 0
+    n_tab = src.execute("SELECT COUNT(*) FROM _extraction_log WHERE status='extracted'").fetchone()[0]
+    con.execute("INSERT OR REPLACE INTO _documents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (sid, kind, meta.get("title"), meta.get("author"), meta.get("created"), meta.get("modified"),
+                 meta.get("sent") or meta.get("date"), meta.get("from"),
+                 "; ".join(x for x in (meta.get("to"), meta.get("cc")) if x) or None, meta.get("subject"),
+                 int(pages) if pages and str(pages).isdigit() else None, n_blocks, n_tab, n_att))
+    fts = con.execute("SELECT 1 FROM sqlite_master WHERE name='_blocks_fts'").fetchone() is not None
+    for bid, part, bkind, page, section, level, text in src.execute(
+            "SELECT id, part, kind, page, section, level, text FROM _doc_blocks ORDER BY id"):
+        block_id = f"{sid}#{bid}"
+        cur = con.execute("INSERT INTO _blocks VALUES (?,?,?,?,?,?,?,?,?)",
+                          (block_id, sid, part, bkind, page, section, level, bid, text))
+        if fts:
+            con.execute("INSERT INTO _blocks_fts(rowid, text) VALUES (?,?)",
+                        (cur.lastrowid, index_text(" ".join(x for x in (section, text) if x))))
+    con.executemany("INSERT INTO _entities VALUES (?,?,?,?,?,?,?)",
+                    [(sid, f"{sid}#{b}", k, v, n, s, e) for b, k, v, n, s, e in src.execute(
+                        'SELECT block_id, kind, value, normalized, start, "end" FROM _doc_entities')])
+    if "_doc_tables" in src_tables:
+        for table_name, part, page, section, caption in src.execute(
+                "SELECT table_name, part, page, section, caption FROM _doc_tables"):
+            row = con.execute("SELECT table_id FROM _tables WHERE source_id=? AND table_name=?",
+                              (sid, table_name)).fetchone()
+            if row:
+                con.execute("INSERT OR REPLACE INTO _table_origin VALUES (?,?,?,?,?)",
+                            (row[0], part, page, section, caption))
+
+
 def _extract_stage(manifest):
     return next((s for s in manifest.get("stages", []) if s.get("name") == "extract"), None)
 
@@ -194,6 +253,10 @@ def build_catalog(cfg, run_id, manifest=None):
     con = sqlite3.connect(partial)
     try:
         con.executescript(DDL)
+        try:                          # full-text index of document text; optional (needs SQLite's FTS5)
+            con.execute('CREATE VIRTUAL TABLE _blocks_fts USING fts5(text, tokenize="unicode61 remove_diacritics 2")')
+        except sqlite3.OperationalError:
+            pass
         con.execute("INSERT INTO _catalog_meta VALUES (?,?)", ("run_id", run_id))
         con.execute("INSERT INTO _catalog_meta VALUES (?,?)", ("contract_version", str(manifest.get("contract_version", ""))))
         for rec in stage.get("details", {}).get("sources", []):
@@ -267,6 +330,8 @@ def build_catalog(cfg, run_id, manifest=None):
                             if sql_name in col_ids:
                                 con.execute("INSERT INTO _formula_refs VALUES (?,?,?,?,?,?)",
                                             (col_ids[sql_name], table_id, book, sheet, cells, sample))
+                if "_doc_blocks" in src_tables:
+                    _ingest_document(con, src, sid, src_tables, sheet_to_table)
                 if "_unsupported" in src_tables:
                     for scope, sheet_n, kind, count, detail in src.execute(
                         "SELECT scope,sheet_name,kind,count,detail FROM _unsupported").fetchall():

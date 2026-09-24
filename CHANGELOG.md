@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 0.14.0 - Documents: Word, PowerPoint, PDF and e-mail become data (2026-09-24)
+
+The platform's scope widens from "Excel for agents" to "the data locked in office files, for agents". A workspace now
+takes every supported file in the folder (and its sub-folders).
+
+* **Readers** (`xl2ai/documents/readers.py`, one common `Doc` shape: located text blocks, tables, metadata,
+  attachments, stated warnings): Word .docx (headings -> section paths, lists, tables with their captions), PowerPoint
+  .pptx (slide titles, text, speaker notes, tables, and the numbers stored behind charts), PDF (text per page with
+  tables cut out and extracted as tables; scanned pages without a text layer are reported, not silently empty),
+  e-mail .eml (headers, plain or HTML body, attachments) and Outlook .msg (read straight from the OLE container --
+  subject, sender, recipients, sent time, body, attachments -- no Outlook and no fragile third-party parser;
+  rights-protected messages are detected and reported), plus Markdown (headings, pipe tables), CSV, HTML and text.
+  Arabic-Windows (cp1256) text is decoded.
+* **Office readers** (`com_readers.py`) for rights-managed and legacy files on Windows: Word (paragraph outline
+  levels, tables via cells so merged cells work), PowerPoint (titles, text, tables, notes) and Outlook
+  (`OpenSharedItem`, attachments saved and read). COM initialised per thread. Tested with fake object models here;
+  needs a first run on Windows to validate.
+* **Documents as databases** (`documents/store.py`): every table in a document -- including tables of Word files and
+  sheets of Excel files attached to e-mails, recursively -- becomes a typed data table ("1,234.50", "(300)", "12%",
+  Arabic-Indic digits parsed) with the same contract as a sheet, so the catalog, key numbers, relationships, anomalies,
+  report checks and cross-file SQL all work on document tables unchanged. Text goes to `_doc_blocks` with its
+  location; `_doc_entities` holds codes, money with currency, dates (numeric, English and Arabic month names),
+  percentages, e-mails and phones with character spans.
+* **Catalog**: `_documents`, `_blocks` with a full-text index (FTS5; Arabic letter variants, diacritics and the
+  و/ف/ب/ك/ل/ال prefixes folded so "والقاهرة" is found by "القاهره"), `_entities`, `_table_origin`.
+* **Links** (new `links` stage, `_mentions`): every code, e-mail or phone in a document is looked up in the tables --
+  "the e-mail mentions INV-005000 -> row 5003 of Transactions.invoice_no". Listed per document in the agent brief.
+* **Agent tools**: `search` (ranked full-text with location and snippet), `read` (a document, attachment, page,
+  section, or the blocks around a hit), and `save_records`: records an agent extracts from free text are stored in
+  `<data>/extracted.db` only when every field carries a block id and an exact quote, the quote is found in that block
+  and the value in the quote (numbers and dates matched however they are written); everything else is rejected with
+  the reason. Saved tables join with everything else in `query`. CLI: `xl2ai docs search|read`.
+* Cross-file SQL hints now name each cleaned table's raw form exactly (`all rows: <alias>.<table>`).
+* Verified with a real Claude Code session on a mixed folder (Excel, Word, PowerPoint, PDF, two e-mails with Word and
+  Excel attachments): it summarised every file, turned the order e-mail into a proven record and matched it to the
+  sales row, compared the contract with the customer's real purchases, and checked the chart numbers in the deck
+  against the data -- all correct, without opening a single file itself.
+* New optional extras: `pip install -e ".[all]"` (Excel direct engine + document readers).
+
 ## 0.13.2 - Fixes found by a real agent session; Excel engine safe under the agent connection (2026-09-23)
 
 A real Claude Code session (MCP tools only, file tools blocked) was run on a realistic folder: 18k-row sales

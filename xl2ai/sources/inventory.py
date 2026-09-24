@@ -18,8 +18,10 @@ from ..core.errors import Xl2aiError
 from ..core.fsutil import format_mtime, sha256_file, slug
 from .detect import sniff_file
 
-EXTENSIONS = ("xlsx", "xlsm", "xlsb", "xls")
-KINDS = {"xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm"}
+EXTENSIONS = ("xlsx", "xlsm", "xlsb", "xls", "docx", "docm", "doc", "pptx", "pptm", "ppt", "pdf", "msg", "eml",
+              "txt", "md", "csv", "html", "htm")
+KINDS = {"xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "docx", "docm", "doc", "pptx", "pptm", "ppt", "pdf", "msg",
+         "eml", "txt", "md", "csv", "html", "htm"}
 
 
 def expand_paths(paths):

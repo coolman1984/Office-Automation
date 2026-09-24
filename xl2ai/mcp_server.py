@@ -37,20 +37,26 @@ from .core.log import silence
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_TEXT = 60_000              # hard ceiling on one tool answer (characters); answers say when they were cut
 
-INSTRUCTIONS = """xl2ai prepares folders of Excel files for you. Never open the Excel files yourself.
+INSTRUCTIONS = """xl2ai frees the data in a folder of Excel, Word, PowerPoint, PDF and e-mail (.msg/.eml) files. Never open
+those files yourself: everything is already read, verified and indexed.
 
 Workflow:
-1. Call `start` first (pass `workspace` = the folder holding the Excel files, unless the server has a default).
-   It returns the whole picture: tables and what one row means, key numbers, unusual values, reports that
-   disagree with their raw data, how the files connect (ready JOINs), and the gaps you must mention.
+1. Call `start` first (pass `workspace` = the folder, unless the server has a default). It returns the whole
+   picture: tables (from workbooks AND from documents), what one row means, key numbers, unusual values, reports that
+   disagree with their raw data, how files connect (ready JOINs), every document with what it mentions and where
+   those codes live in the data, and the gaps you must mention.
 2. If `start` says the data is not prepared or stale, call `prepare` and keep calling it until it says done.
-3. Then answer with the cheapest tool: `find` (where is X?), `table` (one table in depth), `query` (read-only SQL
-   across all files; plain table names work), `facts` (relationships, lineage, anomalies, reconciliation, ...),
-   `region` (one table inside a multi-table sheet), `trace` (prove where a row came from).
+3. Answer with the cheapest tool: `find` (where is X?), `table` (one table in depth), `query` (read-only SQL across
+   all files; plain table names work and leave totals rows out), `search` (full text of all documents), `read` (a
+   document or the text around a hit), `facts`, `region`, `trace`.
+4. To turn free text into data (an order in an e-mail, the terms of contracts, figures in a PDF): `search`/`read`,
+   then `save_records` with, for every field, the block_id and the exact quote it came from. The server rejects any
+   value it cannot find in its quote; saved records are queryable with `query` like any table.
 
-Rules: quote numbers with their evidence (table + Excel row, or the SQL). Repeat any gap, anomaly or report
-disagreement that bears on the question. Prefer the pre-computed key numbers over writing your own GROUP BY."""
+Rules: quote numbers with their evidence (table + row, or document + block). Repeat any gap, anomaly or report
+disagreement that bears on the question. Prefer pre-computed key numbers over writing your own GROUP BY."""
 
+DOC_KINDS_ENUM = ["heading", "paragraph", "list_item", "slide_title", "note", "email_header", "email_body"]
 FACT_TOPICS = ("relationships", "lineage", "reconciliation", "anomalies", "quality", "keys", "grain", "column_roles",
                "time_coverage", "duplicates", "definitions", "kpis", "rules", "unsupported", "regions",
                "header_groups", "row_flags", "table_kind", "repairs", "digest", "changes")
@@ -115,6 +121,34 @@ TOOLS = [
           {"table": {"type": "string"}, "region": {"type": "integer", "minimum": 1},
            "max_rows": {"type": "integer", "minimum": 1, "maximum": 500}},
           required=("table", "region")),
+    _tool("search", "Search the text of every document",
+          "Full-text search over Word, PowerPoint, PDF, e-mail and text documents (and attachments inside e-mails). "
+          "Tolerant of case, Arabic letter variants and diacritics; all words must match (prefixes allowed). "
+          "Returns block ids, the document, the exact location (attachment > page/slide > heading) and a snippet.",
+          {"text": {"type": "string"}, "kind": {"type": "string", "enum": DOC_KINDS_ENUM},
+           "document": {"type": "string", "description": "limit to one document (its id from `start`)"},
+           "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+          required=("text",)),
+    _tool("read", "Read a document or part of it",
+          "Returns a document's text blocks in order with their block ids: the whole document, or one attachment, "
+          "page/slide, heading section, or the blocks around a search hit (block + around). Bounded; says where to "
+          "continue.",
+          {"document": {"type": "string", "description": "document id (from `start` or `search`)"},
+           "block": {"type": "string", "description": "a block id; returns it with `around` blocks each side"},
+           "around": {"type": "integer", "minimum": 0, "maximum": 50},
+           "part": {"type": "string", "description": "an attachment name (\"\" = the document itself)"},
+           "page": {"type": "integer", "minimum": 1}, "section": {"type": "string"},
+           "max_chars": {"type": "integer", "minimum": 500, "maximum": 40000}},
+          required=("document",)),
+    _tool("save_records", "Save records extracted from text, with proof",
+          "Stores structured records you extracted from documents into a table (created or extended as needed) that "
+          "`query` can join with everything else. EVERY field must carry its source: either per field "
+          "{\"value\": v, \"source\": {\"block_id\": ..., \"quote\": ...}} or one \"_source\" for the whole "
+          "record. The quote must appear in that block and the value in the quote; otherwise the field is rejected "
+          "with the reason (fix and resend). `key` names a field whose value replaces an earlier record.",
+          {"table": {"type": "string"}, "records": {"type": "array", "items": {"type": "object"}},
+           "key": {"type": "string"}},
+          required=("table", "records"), read_only=False),
     _tool("trace", "Prove where a row came from",
           "Returns the source file, sheet and stored values for one Excel row of a table -- the evidence to quote.",
           {"table": {"type": "string"}, "excel_row": {"type": "integer", "minimum": 1}},
@@ -370,6 +404,20 @@ class Server:
     def tool_trace(self, args):
         from .query import trace
         return _table_result(trace(self._cfg(args), args["table"], int(args["excel_row"]))), None
+
+    def tool_search(self, args):
+        from .documents.tools import search
+        return search(self._cfg(args), args["text"], args.get("kind"), args.get("document"),
+                      int(args.get("limit", 20))), None
+
+    def tool_read(self, args):
+        from .documents.tools import read
+        return read(self._cfg(args), args["document"], args.get("part"), args.get("page"), args.get("section"),
+                    args.get("block"), int(args.get("around", 3)), int(args.get("max_chars", 8000))), None
+
+    def tool_save_records(self, args):
+        from .documents.tools import save_records
+        return save_records(self._cfg(args), args["table"], args["records"], args.get("key")), None
 
     def tool_table(self, args):
         import sqlite3

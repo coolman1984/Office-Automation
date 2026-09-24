@@ -39,6 +39,7 @@ STAGES = [
     ("relations", {"relationships": 3}),
     ("digest", {"tables_summarised": 5}),
     ("anomalies", {"anomalies": 4}),
+    ("links", {"documents": 3, "document_links": 7}),
     ("reconcile", {"report_columns_checked": 6, "report_columns_disagreeing": 1}),
     ("changes", {"changes": 27}),
     ("audit", {"checks": 46, "issues": 0}),

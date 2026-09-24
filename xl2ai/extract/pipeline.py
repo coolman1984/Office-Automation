@@ -31,7 +31,12 @@ def resolve_engine(opts):
 
 
 def process_file(src, db_path, opts):
-    """Extract one workbook with the configured engine. Returns (exit_code, [SheetResult], message)."""
+    """Extract one source -- a workbook with the configured engine, or a document (Word, PowerPoint, PDF, e-mail,
+    text) with the document readers. Returns (exit_code, [SheetResult-like], message)."""
+    from ..documents.readers import DOC_KINDS, kind_of
+    if kind_of(src) in DOC_KINDS:
+        from ..documents.store import extract_document
+        return extract_document(src, db_path, opts)
     if resolve_engine(opts) == "direct":
         from .direct import process_file_direct
         return process_file_direct(src, db_path, opts)

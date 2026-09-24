@@ -183,6 +183,8 @@ def build_agent_brief(cfg, run_id, catalog_path=None, in_progress=False):
             lines.extend(_column_lines(con, tid))
             lines.append("")
 
+        from .documents.links import document_lines
+        lines.extend(document_lines(con))
         joins = _join_lines(con)
         if joins:
             lines.append("## How the tables connect (ready-to-use joins)")

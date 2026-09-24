@@ -586,6 +586,11 @@ def sql(cfg, source_id, statement, run_id=None):
             src.execute("ATTACH DATABASE ? AS "+q(alias),(f"file:{path}?mode=ro",))
             aliases.append(alias)
             sid_of[alias]=sid
+        extracted=os.path.join(cfg.data_dir,"extracted.db")
+        if os.path.isfile(extracted):                 # records agents saved from documents, joinable with the rest
+            src.execute("ATTACH DATABASE ? AS extracted",(f"file:{os.path.abspath(extracted)}?mode=ro",))
+            aliases.append("extracted")
+            sid_of["extracted"]="extracted"
         # plain names work too: every table name that exists in exactly one workbook gets a temp view, so
         # "SELECT ... FROM Orders JOIN Customers ..." needs no aliases at all (created before the authorizer)
         seen={}
@@ -605,7 +610,7 @@ def sql(cfg, source_id, statement, run_id=None):
                 src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM {q(alias)}.{q(name)}{cond}")
                 usable.append(name)
                 if skip:
-                    cleaned.append(f"{name} (-{len(skip)})")
+                    cleaned.append(f"{name} (-{len(skip)}; all rows: {alias}.{name})")
             else:
                 # never let SQLite silently pick one workbook's table: the plain name fails, naming the fix
                 name=where[0][1]
@@ -614,8 +619,7 @@ def sql(cfg, source_id, statement, run_id=None):
                 src.execute(f"CREATE TEMP VIEW {q(name)} AS SELECT * FROM "
                             f"{q(f'ambiguous name {name}: it exists in several workbooks - write {choices}')}")
         hint=("tables usable by plain name"
-              +(f" -- totals rows already left out of: {', '.join(cleaned)} (raw rows via <alias>.<table>)"
-                if cleaned else "")
+              +(f" -- totals rows already left out of: {', '.join(cleaned)}" if cleaned else "")
               +"; also qualified as <alias>.<table> with aliases: "+", ".join(aliases)
               +(f"; qualify these (name in several workbooks): {', '.join(sorted(ambiguous))}" if ambiguous else ""))
     else:

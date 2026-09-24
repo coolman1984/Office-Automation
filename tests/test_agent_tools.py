@@ -184,7 +184,7 @@ class TestAgentTools(unittest.TestCase):
         from xl2ai.query import source_alias, sql
         clean = sql(self.cfg, "*", "SELECT SUM(amount), COUNT(*) FROM Orders")
         self.assertEqual(clean["rows"][0], [sum((i % 5 + 1) * 10.0 for i in range(1, 61)), 60])
-        self.assertIn("totals rows already left out of: Orders (-1)", clean["hint"])
+        self.assertIn("totals rows already left out of: Orders (-1; all rows: ", clean["hint"])
         sid = self.cat("SELECT source_id FROM _tables WHERE sheet_name='Orders'")[0][0]
         raw = sql(self.cfg, "*", f"SELECT COUNT(*) FROM {source_alias(sid)}.Orders")
         self.assertEqual(raw["rows"][0][0], 61)

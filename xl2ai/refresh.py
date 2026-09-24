@@ -205,6 +205,15 @@ def stage_reconcile(run, st, cfg, ctx):
                   con.execute("SELECT COUNT(*) FROM _reconciliation WHERE status='partial'").fetchone()[0])
 
 
+def stage_links(run, st, cfg, ctx):
+    from .documents.links import build_mentions
+    path = build_mentions(cfg, run.id, ctx.get("catalog"))
+    with ro_connection(path) as con:
+        if con.execute("SELECT 1 FROM sqlite_master WHERE name='_documents'").fetchone():
+            st.detail("documents", con.execute("SELECT COUNT(*) FROM _documents").fetchone()[0])
+            st.detail("document_links", con.execute("SELECT COUNT(*) FROM _mentions").fetchone()[0])
+
+
 def stage_analyze(run, st, cfg, ctx):
     from .analyze import analyze_catalog
     path = analyze_catalog(cfg, run.id, ctx.get("catalog"))
@@ -235,9 +244,9 @@ def stage_catalog(run, st, cfg, ctx):
 def _extract_worker(path, db, opts):
     """Runs in a separate process (direct engine only): one workbook, output silenced, results sent back."""
     from .core.log import silence
-    from .extract.direct import process_file_direct
+    from .extract.pipeline import process_file
     silence(True)
-    return process_file_direct(path, db, opts)
+    return process_file(path, db, opts)
 
 
 def _worker_count(cfg, opts, pending):
@@ -347,7 +356,8 @@ def stage_extract(run, st, cfg, ctx):
 STAGES = (("sources", stage_sources), ("extract", stage_extract), ("catalog", stage_catalog),
           ("analyze", stage_analyze), ("semantics", stage_semantics), ("repair", stage_repair),
           ("rules", stage_rules), ("relations", stage_relations), ("digest", stage_digest),
-          ("anomalies", stage_anomalies), ("reconcile", stage_reconcile), ("changes", stage_changes),
+          ("anomalies", stage_anomalies), ("reconcile", stage_reconcile), ("links", stage_links),
+          ("changes", stage_changes),
           ("audit", stage_audit), ("contextpack", stage_contextpack), ("agent_brief", stage_agent_brief),
           ("report", stage_report))
 # rules runs before relations: pack-confirmed keys must exist in `_keys` before relation inference can use them

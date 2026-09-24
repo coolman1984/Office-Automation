@@ -68,7 +68,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertFalse(open_workspace(self.folder)["created"])            # idempotent
         cfg = load_config(self.folder)                                       # a folder works as --config
         names = sorted(os.path.basename(s["path"]) for s in build_inventory(cfg)[0])
-        self.assertEqual(names, ["clients.xlsx", "orders.xlsx"])              # sub-folder in, lock file/txt out
+        self.assertEqual(names, ["clients.xlsx", "notes.txt", "orders.xlsx"])   # sub-folder and text in, lock file out
 
     def test_home_workspace_is_found_from_the_excel_folder(self):
         from xl2ai.workspace import open_workspace, resolve_workspace
@@ -134,9 +134,10 @@ class TestMcpServer(unittest.TestCase):
         self.assertIn("Call `start` first", init["instructions"])
         self.assertIsNone(self.rpc("notifications/initialized", notify=True))
         tools = {t["name"]: t for t in self.rpc("tools/list")["result"]["tools"]}
-        self.assertEqual(set(tools), {"start", "prepare", "find", "table", "query", "facts", "region", "trace"})
-        self.assertFalse(tools["prepare"]["annotations"]["readOnlyHint"])
-        self.assertTrue(all(t["annotations"]["readOnlyHint"] for n, t in tools.items() if n != "prepare"))
+        self.assertEqual(set(tools), {"start", "prepare", "find", "table", "query", "facts", "region", "trace",
+                                      "search", "read", "save_records"})
+        writers = {n for n, t in tools.items() if not t["annotations"]["readOnlyHint"]}
+        self.assertEqual(writers, {"prepare", "save_records"})           # everything else only reads
         self.assertEqual(self.rpc("ping")["result"], {})
         self.assertEqual(self.rpc("nope")["error"]["code"], -32601)
         self.assertEqual(self.rpc("tools/call", {"name": "nope"})["error"]["code"], -32602)

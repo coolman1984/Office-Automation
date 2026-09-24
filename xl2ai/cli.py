@@ -33,8 +33,10 @@ STAGES = {
     "digest": ("xl2ai.digest", "main", "pre-compute key numbers: totals, biggest groups, monthly trends"),
     "anomalies": ("xl2ai.anomalies", "main", "flag outliers, odd months, rare negatives and impossible dates"),
     "reconcile": ("xl2ai.reconcile", "main", "check report tables against the raw data they summarise"),
+    "links": ("xl2ai.documents.links", "main", "link codes/e-mails/phones in documents to table rows"),
     "changes": ("xl2ai.changes", "main", "compare a run with the previous trusted run"),
     "pack": ("xl2ai.contextpack", "main", "build a compact deterministic context pack for AI"),
+    "docs": ("xl2ai.documents.tools", "cli_main", "search and read the text of Word/PowerPoint/PDF/e-mail documents"),
     "query": ("xl2ai.query", "main", "read-only capped schema/describe/sample/aggregate/trace/sql tools"),
     "report": ("xl2ai.report", "main", "show one-screen health, rules, KPI and change summary"),
 }

@@ -27,6 +27,7 @@ STAGE_PURPOSE = {
     "relations": "infer relationships between tables",
     "anomalies": "flag outliers, odd months, rare negatives and impossible dates",
     "reconcile": "check report tables against the raw data they summarise",
+    "links": "link codes, e-mails and phones in documents to the table rows that hold them",
     "digest": "pre-compute key numbers: totals, biggest groups, monthly trends",
     "changes": "compare against the previous trusted run",
     "audit": "verify the run's artifacts agree with each other",

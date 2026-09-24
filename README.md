@@ -23,6 +23,10 @@ Excel remains the source of truth. AI never needs to open the raw workbook or in
 - Report-shaped sheets are described, not flattened blindly: several tables on one sheet (`query meta regions`,
   `query region <table> <n>` reads one back out under its own header) and grouped multi-row headers
   ("Plan" under "Q1") are detected and recorded.
+- Documents too: Word, PowerPoint (including the numbers behind charts), PDF, Outlook .msg / .eml e-mail (with
+  attachments, recursively), Markdown, CSV and HTML. Their tables become queryable tables, their text becomes
+  searchable (Arabic-aware), codes they mention are linked to the table rows holding them, and agents can turn free
+  text into records that are only accepted with a verified source quote (`search`, `read`, `save_records`).
 - An agent connection (MCP server, `xl2ai serve`) with eight purpose-named tools, and workspaces: point it at any
   folder of Excel files (`xl2ai open`), nothing else to configure.
 - Reports checked against the raw data they summarise (disagreeing rows listed with both numbers), and unusual
@@ -77,7 +81,7 @@ Python 3.11+ is required. The Excel engine additionally requires Windows and Mic
 runs anywhere.
 
 ```powershell
-python -m pip install -e ".[direct]"      # the direct engine (python-calamine); drop [direct] for Excel-only
+python -m pip install -e ".[all]"         # direct Excel engine + Word/PowerPoint/PDF/e-mail readers
 xl2ai --help
 ```
 

@@ -42,6 +42,16 @@ additive = minor, breaking = major (a major bump requires a migration note in `C
 Invariants (checked by `_verification`): stored cells == Excel `COUNTA` of the whole sheet; per-column non-null and
 numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes: 0 ok, 1 file failed, 2 some sheets failed, 3 verification mismatch.
 
+### Document sources [built]
+
+A document source's database has the workbook tables above (one data table per document table; `_xl_row` = row in
+the source table, 1 = header) plus `_doc_meta(key, value, part)`, `_doc_blocks(id, part, kind, page, section, level,
+text)`, `_doc_entities(block_id, kind, value, normalized, start, end)`, `_doc_tables(table_name, part, page, section,
+caption, idx)`, `_doc_attachments(part, name, kind, size, status, note)`. Reader limits (scanned pages, protected
+e-mail, unreadable attachments) are `_unsupported` rows of kind `reader_limit`. Saved agent records live outside runs
+in `<data_dir>/extracted.db`: one table per `save_records` table plus `_evidence(table_name, record_id, field,
+block_id, source_id, quote, run_id, saved_at)`.
+
 ## 3. Later stages -> `catalog.db` per run  [phases 4-7]
 
 | Table | Key fields |
@@ -68,6 +78,11 @@ numeric sum equal Excel's; a failed sheet is recorded, never dropped. Exit codes
 | `_digest_tables` [built] | table_id, status (`computed\|skipped\|error`), reason, excluded_rows, measures_json, units_json, dims_json, date_column |
 | `_anomalies` [built] | id, table_id, column_name, kind (`outlier\|negative\|trend_jump\|missing_period\|date_out_of_range`), severity, count, detail, examples (JSON `[[xl_row, value], ...]` or months), sql -- always `inferred`; totals rows excluded |
 | `_reconciliation` [built] | id, report_table_id, report_column, label_column, source_table_id, source_column, dim_column, agg (`SUM\|COUNT`), compared, matched, status (`reconciled\|partial`), mismatches (JSON, <= 10, with both numbers and the report's Excel row), sql |
+| `_documents` [built] | source_id, kind, title, author, created, modified, sent, sender, recipients, subject, pages, blocks, tables, attachments |
+| `_blocks` / `_blocks_fts` [built] | block_id (`<source_id>#<n>`), source_id, part (attachment path, "" = the document), kind, page (page/slide), section (heading path), level, ord, text / folded full-text index |
+| `_entities` [built] | source_id, block_id, kind (`code\|money\|date\|percent\|email\|phone`), value as written, normalized, start, end |
+| `_table_origin` [built] | table_id, part, page, section, caption -- where a document table came from |
+| `_mentions` [built] | normalized, kind, source_id, block_id, table_id, column_name, rows, first_row -- a document value found in a table |
 | `_repairs` [built, opt-in] | id, table_id, column_id, xl_row, original_value, repaired_value, rule (`null_token\|category_consolidation\|text_as_number`) -- empty unless `[repair].enabled = true`; never written back to any data table |
 
 ## 4. Run manifest [phase 1] `manifest.json`

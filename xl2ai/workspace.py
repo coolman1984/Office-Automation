@@ -127,7 +127,8 @@ def open_workspace(folder, name=None, engine="auto", recursive=True, home=False,
              "[project]", f"name = {_toml(name)}", 'data_dir = "data"', "",
              "[environment]", f"wrapper_prefixes = [{', '.join(_toml(p) for p in wrapper_prefixes)}]", "",
              "[extract]", f"engine = {_toml(engine)}", ""]
-    lines += ["[[sources]]", f"path = {_toml(pattern + '.xls*')}      # .xlsx .xlsm .xlsb .xls", ""]
+    lines += ["[[sources]]",
+              f"path = {_toml(pattern)}      # every supported file: Excel, Word, PowerPoint, PDF, e-mail, text", ""]
     config = os.path.join(ws, CONFIG_NAME)
     with open(config, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))

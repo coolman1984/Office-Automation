@@ -69,7 +69,7 @@ tool accepts a `workspace` argument, so `--workspace` is only the default.
 
 ### What the agent sees
 
-On connection the server hands the agent its workflow (MCP `instructions`), then eight tools:
+On connection the server hands the agent its workflow (MCP `instructions`), then eleven tools:
 
 | Tool | When | Returns |
 |---|---|---|
@@ -81,6 +81,9 @@ On connection the server hands the agent its workflow (MCP `instructions`), then
 | `facts` | pre-computed lists | relationships, lineage, reconciliation, anomalies, quality, grain, changes, ... |
 | `region` | a sheet with several tables | one region under its own headers |
 | `trace` | evidence | file > sheet > row for one stored row |
+| `search` | words in documents | ranked hits across Word/PowerPoint/PDF/e-mail text (and attachments), with location and snippet |
+| `read` | the text itself | a document, an attachment, a page/slide, a heading's section, or the blocks around a hit |
+| `save_records` | free text -> table | stores extracted records only when every field's quote is found in its block and the value in the quote; queryable with `query` |
 
 Every answer is compact JSON (columns + rows, not objects per row), capped, says when it was truncated, carries
 evidence, and ends with what to do next. Errors come back as tool results (`isError`) with a code and a hint the
